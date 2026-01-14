@@ -2,7 +2,7 @@ import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
 
-from constants import MAG_SWEEP_MIN, MAG_SWEEP_MAX, MAG_SWEEP_STEP
+from viola_etc.constants import MAG_SWEEP_MIN, MAG_SWEEP_MAX, MAG_SWEEP_STEP
 
 from viola_etc.models import (
     TargetParams,
