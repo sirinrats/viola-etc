@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from constants import (
+from .constants import (
     ARCSEC2_TO_SR,
     MAG_SWEEP_MAX,
     MAG_SWEEP_MIN,

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from constants import C_M_S, H_J_S, K_B_J_K, UM_TO_M, get_fnu0_w_m2_hz
+from .constants import C_M_S, H_J_S, K_B_J_K, UM_TO_M, get_fnu0_w_m2_hz
 
 
 def mag_to_fnu_w_m2_hz(mag: float, band: str, mag_system: str) -> float:
