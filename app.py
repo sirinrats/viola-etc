@@ -4,14 +4,15 @@ import matplotlib.pyplot as plt
 
 from constants import MAG_SWEEP_MIN, MAG_SWEEP_MAX, MAG_SWEEP_STEP
 
-from etc_core import (
+from viola_etc.models import (
     TargetParams,
     ObservingCondition,
     UserInputs,
     InstrumentConfig,
     SiteConfig,
-    run_etc,
 )
+from viola_etc.runner import run_etc
+
 
 # -------------------------
 # Session state
@@ -51,7 +52,7 @@ if "find_valleys" not in st.session_state:
 # -------------------------
 # Page
 # -------------------------
-st.header("VIOLA ETC -- Ver 0.2 🌈 ", divider="rainbow")
+st.header("VIOLA ETC -- Ver 0.3 🌈 ", divider="rainbow")
 
 st.markdown(
     """
