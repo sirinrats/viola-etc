@@ -10,18 +10,18 @@ This module stitches together:
 - magnitude sweep
 - molecule templates (optional)
 
-Goal: keep runner readable; push helpers to dedicated modules.
 """
 
 from __future__ import annotations
 
+import inspect
 import math
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .constants import (
+from ..constants import (
     ARCSEC2_TO_SR,
     MAG_SWEEP_MAX,
     MAG_SWEEP_MIN,
@@ -31,7 +31,7 @@ from .constants import (
     H_J_S,
 )
 
-from .models import (
+from ..models import (
     ETCResult,
     InstrumentConfig,
     SiteConfig,
@@ -39,24 +39,25 @@ from .models import (
     get_default_instrument_config,
     get_default_site_config,
 )
+
 from .validate import (
     validate_instrument_config,
     validate_mag_sweep,
     validate_site_config,
     validate_user_inputs,
 )
-from .sky_io import (
+from ..observing.sky_io import (
     check_sky_grid_vs_resolution,
     get_sky_fits_path,
     load_skytable,
 )
-from .photometry import (
+from ..target.photometry import (
     fnu_w_m2_hz_to_mjy,
     mag_to_fnu_w_m2_hz,
     planck_blambda_W_m2_um_sr,
     planck_bnu_W_m2_hz_sr,
 )
-from .molecules import (
+from ..target.molecules import (
     estimate_transits_for_molecules,
     load_molecule_templates,
 )
@@ -102,6 +103,12 @@ def build_snr_mag_sweep(
     mag_max: float,
     mag_step: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Compute median SNR per resolution element as a function of magnitude.
+
+    We assume background terms stay fixed (same sky/thermal/dark/read) and only
+    scale the signal with magnitude.
+    """
     # base signal at m=0
     scale_current = 10.0 ** (-0.4 * m_mag)
     s_res_base0 = s_res_arr / scale_current
@@ -129,7 +136,7 @@ def run_etc(
     mag_sweep_min: float = MAG_SWEEP_MIN,
     mag_sweep_max: float = MAG_SWEEP_MAX,
     mag_sweep_step: float = MAG_SWEEP_STEP,
-    molecule_dir: str = "./molecular_lines",
+    molecule_dir: str = "./molecular_templates",
     enable_molecules: bool = True,
     # molecule knobs
     prom_abs: float = 0.05,
@@ -141,10 +148,16 @@ def run_etc(
     find_valleys: bool = False,
 ) -> ETCResult:
     """
-    Main ETC entry point (v0.3).
+    Main ETC entry point.
+
+    Physically ordered pipeline:
+      Target (TOA) -> Atmosphere -> Telescope/Instrument -> Detector
 
     Returns ETCResult with stable fields for Streamlit UI.
     """
+    # -------------------------
+    # Defaults + validation
+    # -------------------------
     cfg = get_default_instrument_config() if cfg is None else cfg
     site = get_default_site_config() if site is None else site
 
@@ -153,7 +166,9 @@ def run_etc(
     validate_user_inputs(u, cfg)
     validate_mag_sweep(mag_sweep_min, mag_sweep_max, mag_sweep_step)
 
-    # --- derived scalars ---
+    # -------------------------
+    # Derived scalars
+    # -------------------------
     band = u.target.band.strip().upper()
     lo_um, hi_um = compute_band_window_um(band, cfg)
 
@@ -162,7 +177,9 @@ def run_etc(
     t_total_s = compute_total_exptime_s(u.obs.t_exp_s, u.obs.n_exp)
     pair_factor = variance_pair_factor(u.obs.use_nod_subtraction)
 
-    # --- load sky model ---
+    # -------------------------
+    # Load atmosphere/sky model
+    # -------------------------
     sky_fits_path = get_sky_fits_path(site, u.obs.sky_model_name)
     lam_um_arr, trans_arr, zl_arr, oh_arr, sml_arr, sky_phi_um_arcsec2 = load_skytable(
         sky_fits_path=sky_fits_path,
@@ -172,15 +189,13 @@ def run_etc(
     )
     grid_stats = check_sky_grid_vs_resolution(lam_um_arr, cfg.resolving_power)
 
-    # --- mag -> fnu ---
+    # -------------------------
+    # Target photometry (sets the TOA flux scale)
+    # -------------------------
     fnu = mag_to_fnu_w_m2_hz(u.target.m_mag, band, u.target.mag_system)
     f_mjy = fnu_w_m2_hz_to_mjy(fnu)
 
-    # =========================
-    # SIGNAL
-    # =========================
     lam_m_arr = lam_um_arr * UM_TO_M
-
     lam_ref_um = float(np.nanmedian(lam_um_arr))
     lam_ref_m = lam_ref_um * UM_TO_M
 
@@ -197,12 +212,23 @@ def run_etc(
         # phoenix placeholder: flat Fnu
         F_lambda_um_arr = (C_M_S / lam_m_arr**2) * fnu * 1e-6
 
+    # =========================
+    # SIGNAL (Target -> Atmosphere -> Instrument -> Detector)
+    # =========================
+    # --- (1) photons from target above atmosphere (TOA) ---
     e_photon_arr = H_J_S * C_M_S / lam_m_arr
-    ph_source_arr = F_lambda_um_arr / e_photon_arr  # ph s^-1 m^-2 um^-1
+    ph_toa_rate_arr = (F_lambda_um_arr / e_photon_arr)  # ph s^-1 m^-2 um^-1
 
+    # per-resolution bandwidth
     delta_lambda_um_arr = lam_um_arr / cfg.resolving_power
 
-    # slit throughput (seeing -> slit loss)
+    # photons collected by telescope in one exposure set (still TOA, not yet attenuated)
+    N_toa_res_arr = ph_toa_rate_arr * delta_lambda_um_arr * area_m2 * t_total_s  # photons / res
+
+    # --- (2) atmosphere transmission (tellurics) ---
+    N_ground_res_arr = N_toa_res_arr * trans_arr
+
+    # --- (3) slit throughput (seeing -> slit loss) ---
     sqrt_ln2 = math.sqrt(math.log(2.0))
     tau_slit = max(
         0.0,
@@ -210,38 +236,54 @@ def run_etc(
     )
     tau_slit = float(tau_slit)
 
-    tau_point_arr = tau_opt * tau_slit * trans_arr
-    s_res_arr = ph_source_arr * delta_lambda_um_arr * area_m2 * t_total_s * tau_point_arr  # e- / res
+    # --- (4) telescope + instrument optics ---
+    # Final detected signal electrons per resolution element
+    s_res_arr = N_ground_res_arr * (tau_opt * tau_slit)  # e- / res
 
     n_pix_per_res = int(cfg.nx * cfg.ny)
     s_pix_arr = s_res_arr / n_pix_per_res
 
     # =========================
-    # BACKGROUND + NOISE
+    # BACKGROUND + NOISE (origins matter)
     # =========================
+    # Extraction solid angle per resolution element:
     omega_res_arcsec2 = cfg.slit_width_as * (cfg.pix_scale_ny * cfg.ny)
     omega_res_sr = omega_res_arcsec2 * ARCSEC2_TO_SR
 
-    tau_extend_arr = tau_opt * trans_arr
+    # --- Sky emission background (origin: atmosphere) ---
+    # IMPORTANT subtlety:
+    # - If sky_phi_um_arcsec2 is already the sky brightness at the telescope (ground),
+    #   you should NOT multiply by trans_arr again.
+    # - Your current behavior multiplies by trans_arr (kept for backward compatibility).
+    #
+    # If later you confirm sky_phi is "at ground", change:
+    #     tau_sky_path_arr = tau_opt
+    # instead of:
+    #     tau_sky_path_arr = tau_opt * trans_arr
+    tau_sky_path_arr = tau_opt * trans_arr
 
-    eps_sky_res_rate_arr = (
+    sky_res_rate_arr = (
         area_m2
         * omega_res_arcsec2
-        * tau_extend_arr
+        * tau_sky_path_arr
         * delta_lambda_um_arr
         * sky_phi_um_arcsec2
     )
-    N_sky_arr = eps_sky_res_rate_arr * t_total_s
+    N_sky_arr = sky_res_rate_arr * t_total_s
 
+    # --- Instrument/telescope thermal background (origin: instrument) ---
     nu_hz_arr = C_M_S / (lam_um_arr * UM_TO_M)
     Bnu_arr = planck_bnu_W_m2_hz_sr(nu_hz_arr, cfg.t_ambient_k)
 
-    # Thermal: (area * omega_sr / (h*R)) * epsilon * Bnu
-    eps_th_res_rate_arr = (area_m2 * omega_res_sr / (H_J_S * cfg.resolving_power)) * cfg.epsilon_eff * Bnu_arr
-    N_th_arr = eps_th_res_rate_arr * t_total_s
+    # Thermal rate per res element:
+    # (area * omega_sr / (h*R)) * epsilon * Bnu
+    th_res_rate_arr = (area_m2 * omega_res_sr / (H_J_S * cfg.resolving_power)) * cfg.epsilon_eff * Bnu_arr
+    N_th_arr = th_res_rate_arr * t_total_s
 
+    # --- Detector backgrounds ---
     N_dark_arr = np.full_like(N_sky_arr, cfg.dark_rate * t_total_s * n_pix_per_res)
 
+    # --- Variances ---
     V_bg_poisson_arr = pair_factor * (N_sky_arr + N_th_arr + N_dark_arr)
     V_read = pair_factor * (cfg.rn_e**2) * u.obs.n_exp * n_pix_per_res
     V_sig_arr = s_res_arr
@@ -270,14 +312,43 @@ def run_etc(
     mol_metrics: Dict[str, Dict[str, Any]] = {}
 
     if enable_molecules:
-        mol_templates = load_molecule_templates(
-            lam_um_arr=lam_um_arr,
-            star_name=u.target.star_name,
-            band=band,
-            resolving_power=cfg.resolving_power,
-            molecule_dir=molecule_dir,
-            molecules=("CH4", "H2O", "CO2", "CO"),
-        )
+        # Signature-safe call (prevents passing unsupported kwargs like star_name)
+        sig = inspect.signature(load_molecule_templates)
+        lt_kwargs: Dict[str, Any] = {}
+
+        # wavelength grid
+        if "lam_um_arr" in sig.parameters:
+            lt_kwargs["lam_um_arr"] = lam_um_arr
+        elif "lam_um" in sig.parameters:
+            lt_kwargs["lam_um"] = lam_um_arr
+
+        # band / resolution
+        if "band" in sig.parameters:
+            lt_kwargs["band"] = band
+        if "resolving_power" in sig.parameters:
+            lt_kwargs["resolving_power"] = cfg.resolving_power
+        elif "R" in sig.parameters:
+            lt_kwargs["R"] = cfg.resolving_power
+
+        # templates directory
+        if "molecule_dir" in sig.parameters:
+            lt_kwargs["molecule_dir"] = molecule_dir
+        elif "template_dir" in sig.parameters:
+            lt_kwargs["template_dir"] = molecule_dir
+
+        # molecules list
+        default_mols = ("CH4", "H2O", "CO2", "CO")
+        if "molecules" in sig.parameters:
+            lt_kwargs["molecules"] = default_mols
+        elif "mols" in sig.parameters:
+            lt_kwargs["mols"] = default_mols
+
+        # star_name ONLY if supported
+        if "star_name" in sig.parameters:
+            lt_kwargs["star_name"] = getattr(u.target, "star_name", "")
+
+        mol_templates = load_molecule_templates(**lt_kwargs)
+
         if mol_templates:
             mol_metrics = estimate_transits_for_molecules(
                 templates=mol_templates,
@@ -310,10 +381,9 @@ def run_etc(
         f"Telluric transmission: {np.nanmedian(trans_arr):.3f}",
         f"Sky grid sampling: {grid_stats['dlam_grid_med_nm']:.3f} nm",
         f"Instrument resolution: {grid_stats['dlam_res_med_nm']:.3f} nm (R = {cfg.resolving_power:.0f})",
-        f"Slit throughput (seeing→slit): {tau_slit:.2f}",
+        f"Slit throughput (seeing → slit): {tau_slit:.2f}",
         f"Flux density: {f_mjy:.2f} mJy",
-        f"Median signal per res: {np.nanmedian(s_res_arr):.1f} e-",
-        f"Median SNR per res: {np.nanmedian(snr_res_arr):.2f}",
+        f"Median SNR per resolution: {np.nanmedian(snr_res_arr):.0f}",
     ]
 
     if np.isfinite(ratio) and ratio > 1.5:
@@ -326,7 +396,7 @@ def run_etc(
             summary_lines.append("Molecule templates loaded: NONE")
 
     # =========================
-    # Meta (debug-friendly)
+    # Metadata (debug-friendly)
     # =========================
     meta: Dict[str, Any] = {
         "user_inputs": asdict(u),
@@ -390,4 +460,3 @@ def run_etc(
         molecule_templates=mol_templates,
         molecule_metrics=mol_metrics,
     )
-

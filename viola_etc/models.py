@@ -8,7 +8,6 @@ This module defines:
 - hidden defaults: InstrumentConfig, SiteConfig
 - outputs container: ETCResult
 
-Design goal: keep these as "dumb containers" (no heavy logic).
 """
 
 from __future__ import annotations

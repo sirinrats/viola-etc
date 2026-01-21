@@ -10,7 +10,7 @@ from typing import Dict
 
 import numpy as np
 
-from .models import InstrumentConfig, SiteConfig, UserInputs
+from ..models import InstrumentConfig, SiteConfig, UserInputs
 
 
 def validate_user_inputs(u: UserInputs, cfg: InstrumentConfig) -> None:
@@ -29,8 +29,8 @@ def validate_user_inputs(u: UserInputs, cfg: InstrumentConfig) -> None:
     if sed not in ("blackbody", "phoenix"):
         raise ValueError("source_sed must be 'blackbody' or 'phoenix'")
 
-    if u.target.T_star_K <= 0:
-        raise ValueError("T_star_K must be > 0")
+    if (not np.isfinite(u.target.T_star_K)) or (u.target.T_star_K < 2000.0) or (u.target.T_star_K > 40000.0):
+        raise ValueError("T_star_K must be a finite number in the range 2000–40000 K")
 
     if not np.isfinite(u.target.planet_line_contrast):
         raise ValueError("planet_line_contrast must be finite")
@@ -86,10 +86,4 @@ def validate_mag_sweep(mag_min: float, mag_max: float, mag_step: float) -> None:
         raise ValueError("mag_sweep_step must be > 0")
     if mag_max <= mag_min:
         raise ValueError("mag_sweep_max must be > mag_sweep_min")
-
-
-def validate_optics_transmissions(optics: Dict[str, float]) -> None:
-    vals = np.array(list(optics.values()), dtype=float)
-    if np.any(vals < 0.0) or np.any(vals > 1.0):
-        raise ValueError(f"Optics transmissions must be in [0,1]. Got: {optics}")
-
+    

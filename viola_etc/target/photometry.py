@@ -4,7 +4,7 @@ viola_etc/photometry.py
 Photometry + Planck helper functions.
 
 Notes:
-- mag -> Fnu uses constants.get_fnu0_w_m2_hz (your existing zero points)
+- mag -> Fnu uses constants.get_fnu0_w_m2_hz 
 - Planck functions are pure physics helpers
 """
 
@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .constants import C_M_S, H_J_S, K_B_J_K, UM_TO_M, get_fnu0_w_m2_hz
-
+from ..constants import C_M_S, H_J_S, K_B_J_K, UM_TO_M, get_fnu0_w_m2_hz
 
 def mag_to_fnu_w_m2_hz(mag: float, band: str, mag_system: str) -> float:
     """

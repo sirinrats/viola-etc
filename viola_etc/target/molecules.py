@@ -120,18 +120,11 @@ def _try_find_peaks(y: np.ndarray, prominence: float, distance: int) -> np.ndarr
 
 def load_molecule_templates(
     lam_um_arr: np.ndarray,
-    star_name: str,
     band: str,
     resolving_power: float,
-    molecule_dir: str = "./molecular_lines",
+    molecule_dir: str = "./molecular_templates",
     molecules: Tuple[str, ...] = ("CH4", "H2O", "CO2", "CO"),
 ) -> Dict[str, Dict[str, Any]]:
-    """
-    Load templates and resample them to the ETC wavelength grid.
-
-    Returns dict keyed by mol.lower(), each with:
-      path, wl_um, template_raw, template_resampled
-    """
     out: Dict[str, Dict[str, Any]] = {}
 
     base = Path(molecule_dir)
@@ -139,27 +132,39 @@ def load_molecule_templates(
         return out
 
     band_u = band.strip().upper()
-    star = str(star_name).strip()
-    if len(star) == 0:
-        return out
-
     R_int = int(round(float(resolving_power)))
 
     for mol in molecules:
-        fn = f"{star}_{mol}_{band_u}_band_R{R_int}.csv"
-        p = base / fn
-        if not p.exists():
+        mol_u = mol.strip().upper()
+
+        # Your chosen convention: *_{MOL}_{BAND}_*.csv
+        # Also include R in the pattern if you want tighter matching.
+        patterns = [
+            f"*_{mol_u}_{band_u}_band_R{R_int}.csv",
+            f"*_{mol_u}_{band_u}_*.csv",  # fallback if R not in filename
+        ]
+
+        matches = []
+        for pat in patterns:
+            matches = sorted(base.glob(pat))
+            if matches:
+                break
+
+        if not matches:
             continue
+
+        # If multiple matches, pick deterministically:
+        # 1) prefer the first after sort (stable), OR
+        # 2) choose newest: max(matches, key=lambda p: p.stat().st_mtime)
+        p = matches[0]
 
         try:
             data = np.genfromtxt(str(p), delimiter=",", names=True, dtype=None, encoding=None)
-            if data is None or data.dtype.names is None:
-                continue
-            if "wl_micron" not in data.dtype.names or "transit_cm" not in data.dtype.names:
+            if ("wl_micron" not in data.dtype.names) or ("transit_cm" not in data.dtype.names):
                 continue
 
             wl = np.asarray(data["wl_micron"], float)
-            y = np.asarray(data["transit_cm"], float)
+            y  = np.asarray(data["transit_cm"], float)
         except Exception:
             continue
 
@@ -167,11 +172,13 @@ def load_molecule_templates(
         y_res = _interp_to_grid(wl, y0, lam_um_arr)
         y_res = _normalize_minmax_safe(y_res)
 
-        out[mol.lower()] = {
+        out[mol_u.lower()] = {
             "path": str(p),
             "wl_um": wl,
             "template_raw": y0,
             "template_resampled": y_res,
+            "n_matches": len(matches),
+            "all_matches": [str(x) for x in matches],
         }
 
     return out

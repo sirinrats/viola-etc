@@ -2,7 +2,7 @@
 viola_etc/constants.py
 
 Project-wide physical constants and unit conversion helpers.
-(v0.3 package copy)
+
 """
 
 from __future__ import annotations

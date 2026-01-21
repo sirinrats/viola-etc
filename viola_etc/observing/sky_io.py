@@ -5,6 +5,7 @@ Sky model pathing + SkyCalc FITS I/O.
 
 Expected sky model layout:
   ./sky_models/<sky_model_name>/skytable.fits
+  
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import Dict, Tuple
 
 import numpy as np
 
-from .models import InstrumentConfig, SiteConfig
+from ..models import InstrumentConfig, SiteConfig
 
 
 def get_sky_fits_path(site: SiteConfig, sky_model_name: str) -> str:
