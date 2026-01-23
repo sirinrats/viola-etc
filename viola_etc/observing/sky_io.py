@@ -5,28 +5,97 @@ Sky model pathing + SkyCalc FITS I/O.
 
 Expected sky model layout:
   ./sky_models/<sky_model_name>/skytable.fits
-  
+
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, Tuple
+import re
 
 import numpy as np
 
 from ..models import InstrumentConfig, SiteConfig
 
 
-def get_sky_fits_path(site: SiteConfig, sky_model_name: str) -> str:
+def _parse_alt_pwv_from_filename(p: Path) -> Tuple[float, float] | None:
     """
-    Build expected path:
+    Parse alt and pwv from filenames like:
+      skytable_alt30_pwv0p5_JHK_R300k.fits
+
+    Returns (alt_deg, pwv_mm) or None if not matched.
+    """
+    name = p.stem.lower()
+
+    m_alt = re.search(r"alt(?P<alt>\d+(?:p\d+)?)", name)
+    m_pwv = re.search(r"pwv(?P<pwv>\d+(?:p\d+)?)", name)
+
+    if (m_alt is None) or (m_pwv is None):
+        return None
+
+    alt_s = m_alt.group("alt").replace("p", ".")
+    pwv_s = m_pwv.group("pwv").replace("p", ".")
+
+    try:
+        return float(alt_s), float(pwv_s)
+    except ValueError:
+        return None
+
+
+def _pick_closest_grid_fits(grid_dir: Path, alt_deg: float, pwv_mm: float) -> str:
+    files = sorted(grid_dir.glob("*.fits"))
+    if not files:
+        raise FileNotFoundError(f"No .fits files found in: {grid_dir}")
+
+    candidates = []
+    for f in files:
+        parsed = _parse_alt_pwv_from_filename(f)
+        if parsed is None:
+            continue
+        a, w = parsed
+        candidates.append((f, a, w))
+
+    if not candidates:
+        raise ValueError(
+            f"Could not parse alt/pwv from FITS filenames in {grid_dir}. "
+            "Expected pattern like 'skytable_alt30_pwv0p5_*.fits'."
+        )
+
+    # Nearest neighbor in (alt, pwv).
+    # Simple L1 metric; you can switch to weighted if desired.
+    best = min(candidates, key=lambda r: abs(r[1] - alt_deg) + abs(r[2] - pwv_mm))
+    return str(best[0])
+
+
+def get_sky_fits_path(
+    site: SiteConfig,
+    sky_model_name: str,
+    *,
+    target_alt_deg: float | None = None,
+    pwv_mm: float | None = None,
+) -> str:
+    """
+    If sky_model_name == "SkyCalc_Grid":
+      pick closest FITS from:
+        <site.sky_model_base_dir>/SkyCalc_Grid/*.fits
+
+    Else (legacy):
       <site.sky_model_base_dir>/<sky_model_name>/skytable.fits
     """
     name = str(sky_model_name).strip()
     if len(name) == 0:
         raise ValueError("sky_model_name must be a non-empty string")
-    return str(Path(site.sky_model_base_dir) / name / "skytable.fits")
+
+    base = Path(site.sky_model_base_dir)
+
+    if name == "SkyCalc_Grid":
+        if target_alt_deg is None or pwv_mm is None:
+            raise ValueError("SkyCalc_Grid requires target_alt_deg and pwv_mm")
+        grid_dir = base / "SkyCalc_Grid"
+        return _pick_closest_grid_fits(grid_dir, float(target_alt_deg), float(pwv_mm))
+
+    return str(base / name / "skytable.fits")
 
 
 def load_skytable(

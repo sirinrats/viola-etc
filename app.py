@@ -48,7 +48,9 @@ BASE_DEFAULTS = {
     "n_exp": 50,
     "seeing_fwhm_as": 1.0,
     "use_nod_subtraction": False,
-    "sky_model_name": "skymodel_Paranal_hd21520_pwv1p0",
+    "sky_model_name": "SkyCalc_Grid",
+    "target_alt_deg": 60.0,
+    "pwv_mm": 1.0,
 }
 
 DET_DEFAULTS = {
@@ -81,6 +83,9 @@ INPUT_KEYS = [
     "seeing_fwhm_as",
     "use_nod_subtraction",
     "sky_model_name",
+    "target_alt_deg",
+    "pwv_mm",
+
     # sweep
     "mag_sweep_min",
     "mag_sweep_max",
@@ -187,7 +192,7 @@ def init_session_state():
         ss_default(k, v)
 
     # Coerce numeric base keys (prevents type drift)
-    for k in ["m_mag", "mag_sweep_min", "mag_sweep_max", "mag_sweep_step", "seeing_fwhm_as"]:
+    for k in ["m_mag", "mag_sweep_min", "mag_sweep_max", "mag_sweep_step", "seeing_fwhm_as", "target_alt_deg", "pwv_mm"]:
         _coerce_numeric(k, BASE_DEFAULTS[k])
     for k in ["T_star_K", "t_exp_s", "n_exp"]:
         _coerce_numeric(k, BASE_DEFAULTS[k])
@@ -464,6 +469,26 @@ def render_observing_section():
             key="n_exp",
         )
 
+    c5, c6 = st.columns(2)
+    with c5:
+        st.number_input(
+            "Target altitude (deg)",
+            min_value=1.0,
+            max_value=90.0,
+            step=1.0,
+            format="%.0f",
+            key="target_alt_deg",
+        )
+    with c6:
+        st.number_input(
+            "PWV (mm)",
+            min_value=0.1,
+            max_value=20.0,
+            step=0.1,
+            format="%.1f",
+            key="pwv_mm",
+        )
+
     c3, c4 = st.columns(2)
     with c3:
         st.number_input(
@@ -477,12 +502,6 @@ def render_observing_section():
         vspacer(28)
         st.checkbox("A–B nod subtraction", key="use_nod_subtraction")
 
-    with st.expander("Observing conditions (advanced)", expanded=False):
-        st.text_input(
-            "Sky model",
-            key="sky_model_name",
-            help="Currently uses precomputed sky models generated with ESO SkyCalc. Support for custom sky models will be added later.",
-        )
 
 
 def render_outputs_section():
@@ -539,7 +558,10 @@ def run_etc_if_clicked(run_clicked: bool):
         use_nod_subtraction=bool(st.session_state.use_nod_subtraction),
         seeing_fwhm_as=float(st.session_state.seeing_fwhm_as),
         sky_model_name=str(st.session_state.sky_model_name),
+        target_alt_deg=float(st.session_state.target_alt_deg),
+        pwv_mm=float(st.session_state.pwv_mm),
     )
+
 
     u = UserInputs(target=target, obs=obs)
     cfg = InstrumentConfig()
@@ -580,6 +602,13 @@ def render_tab_result(result):
 
     # Pull summary lines once
     lines = list(getattr(result, "summary_lines", None) or [])
+
+    # Show which sky FITS file was used (for grid verification)
+    meta = getattr(result, "meta", {}) or {}
+    sky_path = meta.get("sky_fits_path", None)
+    if sky_path:
+        st.caption(f"Sky model file used: {sky_path}")
+
 
     # Headline: Median SNR per resolution
     headline_key = "Median SNR per resolution:"

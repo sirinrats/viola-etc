@@ -123,9 +123,11 @@ class ObservingCondition:
     n_exp: int
     use_nod_subtraction: bool
     seeing_fwhm_as: float
+    target_alt_deg: float = 60.0
+    pwv_mm: float = 1.0
 
     # sky model folder under ./sky_models
-    sky_model_name: str = "skymodel_Paranal_hd21520_pwv1p0"
+    sky_model_name: str = "SkyCalc_Grid"
 
 
 # =========================

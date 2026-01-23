@@ -29,8 +29,10 @@ def validate_user_inputs(u: UserInputs, cfg: InstrumentConfig) -> None:
     if sed not in ("blackbody", "phoenix"):
         raise ValueError("source_sed must be 'blackbody' or 'phoenix'")
 
-    if (not np.isfinite(u.target.T_star_K)) or (u.target.T_star_K < 2000.0) or (u.target.T_star_K > 40000.0):
-        raise ValueError("T_star_K must be a finite number in the range 2000–40000 K")
+    if not np.isfinite(u.target.T_star_K):
+        raise ValueError("T_star_K must be finite")
+    if not (2000.0 <= float(u.target.T_star_K) <= 40000.0):
+        raise ValueError("T_star_K must be in [2000, 40000]")
 
     if not np.isfinite(u.target.planet_line_contrast):
         raise ValueError("planet_line_contrast must be finite")
@@ -46,6 +48,17 @@ def validate_user_inputs(u: UserInputs, cfg: InstrumentConfig) -> None:
 
     if not isinstance(u.obs.sky_model_name, str) or len(u.obs.sky_model_name.strip()) == 0:
         raise ValueError("sky_model_name must be a non-empty string")
+
+    # Grid inputs (required)
+    if not np.isfinite(u.obs.target_alt_deg):
+        raise ValueError("target_alt_deg must be finite")
+    if not (0.0 < float(u.obs.target_alt_deg) <= 90.0):
+        raise ValueError("target_alt_deg must be in (0, 90] degrees")
+
+    if not np.isfinite(u.obs.pwv_mm):
+        raise ValueError("pwv_mm must be finite")
+    if float(u.obs.pwv_mm) <= 0.0:
+        raise ValueError("pwv_mm must be > 0")
 
     if not isinstance(u.target.star_name, str) or len(u.target.star_name.strip()) == 0:
         raise ValueError("star_name must be a non-empty string")

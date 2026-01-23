@@ -180,7 +180,13 @@ def run_etc(
     # -------------------------
     # Load atmosphere/sky model
     # -------------------------
-    sky_fits_path = get_sky_fits_path(site, u.obs.sky_model_name)
+    sky_fits_path = get_sky_fits_path(
+    site,
+    u.obs.sky_model_name,
+    target_alt_deg=u.obs.target_alt_deg,
+    pwv_mm=u.obs.pwv_mm,
+    )
+
     lam_um_arr, trans_arr, zl_arr, oh_arr, sml_arr, sky_phi_um_arcsec2 = load_skytable(
         sky_fits_path=sky_fits_path,
         band=band,
