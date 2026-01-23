@@ -603,13 +603,6 @@ def render_tab_result(result):
     # Pull summary lines once
     lines = list(getattr(result, "summary_lines", None) or [])
 
-    # Show which sky FITS file was used (for grid verification)
-    meta = getattr(result, "meta", {}) or {}
-    sky_path = meta.get("sky_fits_path", None)
-    if sky_path:
-        st.caption(f"Sky model file used: {sky_path}")
-
-
     # Headline: Median SNR per resolution
     headline_key = "Median SNR per resolution:"
 
@@ -655,6 +648,7 @@ def render_tab_result(result):
 
 
 def render_tab_sky(result):
+
     band_used, _ = get_run_context()
 
     lam = getattr(result, "lam_um", None)
