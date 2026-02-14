@@ -26,8 +26,8 @@ def validate_user_inputs(u: UserInputs, cfg: InstrumentConfig) -> None:
         raise ValueError("m_mag must be finite")
 
     sed = u.target.source_sed.strip().lower()
-    if sed not in ("blackbody", "phoenix"):
-        raise ValueError("source_sed must be 'blackbody' or 'phoenix'")
+    if sed not in ("blackbody", "phoenix", "phoenix-newera"):
+        raise ValueError("source_sed must be 'blackbody', 'phoenix', or 'phoenix-newera'")
 
     if not np.isfinite(u.target.T_star_K):
         raise ValueError("T_star_K must be finite")

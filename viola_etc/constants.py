@@ -45,6 +45,20 @@ MAG_SWEEP_MIN = 5.0
 MAG_SWEEP_MAX = 16.0
 MAG_SWEEP_STEP = 0.5
 
+# =========================
+# PHOENIX-NewEra grid valid range (Teff)
+# =========================
+PHOENIX_NEWERA_TEFF_MIN = 2300.0
+PHOENIX_NEWERA_TEFF_MAX = 12000.0
+
+# =========================
+# PHOENIX-NewEra storage
+# =========================
+PHOENIX_NEWERA_CACHE_DIR = "./.cache/NewEra_grids_R300K"
+# For Streamlit Cloud later (S3/R2/Drive/HF). Keep empty for local dev.
+PHOENIX_NEWERA_REMOTE_BASE_URL = ""
+PHOENIX_NEWERA_GRID_DIR = "./NewEra_grids_R300K"
+
 
 def get_fnu0_w_m2_hz(band: str, mag_system: str) -> float:
     sys = mag_system.strip().upper()

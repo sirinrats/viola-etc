@@ -2,8 +2,12 @@ __pycache__/
 *.pyc
 .DS_Store
 .streamlit/
+.streamlit/secrets.toml
 .env
 .venv/
 venv/
 *.log
-
+NewEra_grids_R300K/
+.cache/
+.cache/**
+*.cache/

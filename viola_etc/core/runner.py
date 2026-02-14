@@ -54,8 +54,8 @@ from ..observing.sky_io import (
 from ..target.photometry import (
     fnu_w_m2_hz_to_mjy,
     mag_to_fnu_w_m2_hz,
-    planck_blambda_W_m2_um_sr,
     planck_bnu_W_m2_hz_sr,
+    stellar_flambda_um_arr,
 )
 from ..target.molecules import (
     estimate_transits_for_molecules,
@@ -201,22 +201,18 @@ def run_etc(
     fnu = mag_to_fnu_w_m2_hz(u.target.m_mag, band, u.target.mag_system)
     f_mjy = fnu_w_m2_hz_to_mjy(fnu)
 
-    lam_m_arr = lam_um_arr * UM_TO_M
-    lam_ref_um = float(np.nanmedian(lam_um_arr))
-    lam_ref_m = lam_ref_um * UM_TO_M
+    lam_m_arr = lam_um_arr * UM_TO_M  # keep this (used later)
 
-    # Convert Fnu at reference wavelength to Flambda at that wavelength:
-    # F_lambda = (c / lambda^2) * F_nu   then per um => * 1e-6
-    F_lambda_ref_um = (C_M_S / lam_ref_m**2) * fnu * 1e-6  # W m^-2 um^-1
+    F_lambda_um_arr, sed_meta = stellar_flambda_um_arr(
+        lam_um_arr=lam_um_arr,
+        band=band,
+        mag_system=u.target.mag_system,
+        m_mag=u.target.m_mag,
+        source_sed=u.target.source_sed,
+        T_star_K=u.target.T_star_K,
+        phoenix_newera_dir=None,
+    )
 
-    sed = u.target.source_sed.strip().lower()
-    if sed == "blackbody":
-        B_ref = float(planck_blambda_W_m2_um_sr(np.array([lam_ref_um]), u.target.T_star_K)[0])
-        B_arr = planck_blambda_W_m2_um_sr(lam_um_arr, u.target.T_star_K)
-        F_lambda_um_arr = F_lambda_ref_um * (B_arr / B_ref)
-    else:
-        # phoenix placeholder: flat Fnu
-        F_lambda_um_arr = (C_M_S / lam_m_arr**2) * fnu * 1e-6
 
     # =========================
     # SIGNAL (Target -> Atmosphere -> Instrument -> Detector)
@@ -383,6 +379,7 @@ def run_etc(
         f"Band: {band}  [{lo_um:.3f}–{hi_um:.3f} μm]",
         f"Exposures: N = {u.obs.n_exp:d},   texp = {u.obs.t_exp_s:.0f} s,   Total = {t_total_s:.0f} s",
         f"A–B nod subtraction: {pair_txt}",
+        f"Telescope diameter: {cfg.d_m:.1f} m",
         f"Optics throughput: {tau_opt:.2f}",
         f"Telluric transmission: {np.nanmedian(trans_arr):.3f}",
         f"Sky grid sampling: {grid_stats['dlam_grid_med_nm']:.3f} nm",
@@ -391,6 +388,14 @@ def run_etc(
         f"Flux density: {f_mjy:.2f} mJy",
         f"Median SNR per resolution: {np.nanmedian(snr_res_arr):.0f}",
     ]
+
+    if sed_meta.get("sed_fallback_reason"):
+        summary_lines.append(
+            f"SED: {sed_meta.get('sed_requested')} (fallback → {sed_meta.get('sed_used')}; {sed_meta.get('sed_fallback_reason')})"
+        )
+    else:
+        summary_lines.append(f"SED: {sed_meta.get('sed_used')}")
+
 
     if np.isfinite(ratio) and ratio > 1.5:
         summary_lines.append("!!!! Grid is coarse vs instrument resolution; OH/telluric features may be mis-estimated.")
@@ -424,6 +429,11 @@ def run_etc(
         "ratio_grid_to_res": float(grid_stats["ratio_grid_to_res"]),
         "fnu_w_m2_hz": float(fnu),
         "flux_mjy": float(f_mjy),
+        "sed_requested": sed_meta.get("sed_requested"),
+        "sed_used": sed_meta.get("sed_used"),
+        "sed_fallback_reason": sed_meta.get("sed_fallback_reason"),
+        "phoenix_file": sed_meta.get("phoenix_file"),
+        "phoenix_teff_selected_k": sed_meta.get("phoenix_teff_selected_k"),
         "tau_slit": float(tau_slit),
         "omega_res_arcsec2": float(omega_res_arcsec2),
         "read_variance_e2": float(V_read),

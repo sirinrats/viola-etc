@@ -13,6 +13,8 @@ from viola_etc.models import (
 )
 from viola_etc.core.runner import run_etc
 
+from dataclasses import replace
+
 
 # =========================
 # App constants
@@ -51,6 +53,7 @@ BASE_DEFAULTS = {
     "sky_model_name": "SkyCalc_Grid",
     "target_alt_deg": 60.0,
     "pwv_mm": 1.0,
+    "telescope_aperture_m": 2.0,
 }
 
 DET_DEFAULTS = {
@@ -85,7 +88,8 @@ INPUT_KEYS = [
     "sky_model_name",
     "target_alt_deg",
     "pwv_mm",
-
+    # telescope
+    "telescope_aperture_m",
     # sweep
     "mag_sweep_min",
     "mag_sweep_max",
@@ -166,6 +170,20 @@ def seed_detection_defaults(force_reset: bool = False):
                     st.session_state[k] = v
 
 
+def normalize_sed_name(x: str) -> str:
+    """
+    Map UI labels to canonical internal SED keys.
+    Canonical keys are stable across UI changes.
+    """
+    s = str(x).strip().lower()
+    s = s.replace("_", "-").replace(" ", "")
+    if "phoenix" in s and "newera" in s:
+        return "phoenix-newera"
+    if "phoenix" in s:
+        return "phoenix-newera"  # treat any phoenix UI as NewEra in v0.4
+    return "blackbody"
+
+
 def on_toggle_planet_detection():
     """
     Callback for enabling molecular detection.
@@ -192,7 +210,7 @@ def init_session_state():
         ss_default(k, v)
 
     # Coerce numeric base keys (prevents type drift)
-    for k in ["m_mag", "mag_sweep_min", "mag_sweep_max", "mag_sweep_step", "seeing_fwhm_as", "target_alt_deg", "pwv_mm"]:
+    for k in ["m_mag", "mag_sweep_min", "mag_sweep_max", "mag_sweep_step", "seeing_fwhm_as", "target_alt_deg", "pwv_mm", "telescope_aperture_m"]:
         _coerce_numeric(k, BASE_DEFAULTS[k])
     for k in ["T_star_K", "t_exp_s", "n_exp"]:
         _coerce_numeric(k, BASE_DEFAULTS[k])
@@ -360,9 +378,10 @@ def render_target_section():
 
         st.radio(
             "Stellar SED model",
-            ["Blackbody", "PHOENIX"],
+            ["Blackbody", "PHOENIX-NewEra"],
             horizontal=True,
             key="source_sed",
+            help="PHOENIX-NewEra grids are available for Teff = 2300–12000 K. If selected with Teff outside this range, the ETC will fall back to the Blackbody model.",
         )
 
         st.markdown("<hr style='margin: 0.4rem 0 1.8rem 0;'>", unsafe_allow_html=True)
@@ -449,6 +468,16 @@ def render_target_section():
 
 def render_observing_section():
     st.subheader("🌦️ Observing conditions")
+
+    c0, _ = st.columns([1, 1])
+    with c0:
+        st.radio(
+            "Telescope aperture",
+            options=[2.0, 8.0],
+            format_func=lambda x: f"{x:.0f} m",
+            horizontal=True,
+            key="telescope_aperture_m",
+        )
 
     c1, c2 = st.columns(2)
     with c1:
@@ -547,7 +576,7 @@ def run_etc_if_clicked(run_clicked: bool):
         band=str(st.session_state.band),
         mag_system=str(st.session_state.mag_system),
         m_mag=float(st.session_state.m_mag),
-        source_sed=str(st.session_state.source_sed).strip().lower(),
+        source_sed=normalize_sed_name(st.session_state.source_sed),
         T_star_K=float(st.session_state.T_star_K),
         planet_line_contrast=float(st.session_state.planet_line_contrast),
     )
@@ -562,9 +591,9 @@ def run_etc_if_clicked(run_clicked: bool):
         pwv_mm=float(st.session_state.pwv_mm),
     )
 
-
     u = UserInputs(target=target, obs=obs)
-    cfg = InstrumentConfig()
+    cfg0 = InstrumentConfig()
+    cfg = replace(cfg0, d_m=float(st.session_state.telescope_aperture_m))
     site = SiteConfig()
 
     kwargs = dict(
@@ -778,7 +807,7 @@ def main():
     layout="centered", 
     )
 
-    st.header("VIOLA Exposure Time Calculator -- Ver 0.3 🌈 ", divider="rainbow")
+    st.header("VIOLA Exposure Time Calculator -- Ver 0.4 🌈 ", divider="rainbow")
 
     render_target_section()
     render_observing_section()
@@ -796,7 +825,9 @@ def main():
 
     show_inputs_changed_warning()
 
-    cfg = InstrumentConfig()
+    cfg0 = InstrumentConfig()
+    cfg = replace(cfg0, d_m=float(st.session_state.get("telescope_aperture_m", cfg0.d_m)))
+
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
         ["Results", "Sky model", "Signal & Noise", "Molecules", "Debug"]
     )
