@@ -11,3 +11,5 @@ NewEra_grids_R300K/
 .cache/
 .cache/**
 *.cache/
+z_bkup/
+legacy/v0_2/
