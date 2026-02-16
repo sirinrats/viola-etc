@@ -255,10 +255,10 @@ def run_etc(
     # --- Sky emission background (origin: atmosphere) ---
     # IMPORTANT subtlety:
     # - If sky_phi_um_arcsec2 is already the sky brightness at the telescope (ground),
-    #   you should NOT multiply by trans_arr again.
-    # - Your current behavior multiplies by trans_arr (kept for backward compatibility).
+    #   should NOT multiply by trans_arr again.
+    # - Current behavior multiplies by trans_arr (kept for backward compatibility).
     #
-    # If later you confirm sky_phi is "at ground", change:
+    # If later confirm sky_phi is "at ground", change:
     #     tau_sky_path_arr = tau_opt
     # instead of:
     #     tau_sky_path_arr = tau_opt * trans_arr

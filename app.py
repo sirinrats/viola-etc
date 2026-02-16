@@ -293,8 +293,10 @@ def render_headline_metric(label: str, value: str):
         unsafe_allow_html=True,
     )
 
-def render_molecule_metric_line(mol: str, n_lines: int, det_sig, ok: bool):
-    det_txt = f"{det_sig:.2f}σ" if ok else "n/a"
+def render_molecule_metric_line(mol: str, n_lines: int, det_sig, ntr):
+    det_txt = "n/a" if (det_sig is None or not np.isfinite(det_sig)) else f"{float(det_sig):.2f}σ"
+    ntr_txt = "n/a" if (ntr is None or not np.isfinite(ntr)) else f"{int(np.ceil(float(ntr)))}"
+
     st.markdown(
         f"""
         <div style="
@@ -306,8 +308,10 @@ def render_molecule_metric_line(mol: str, n_lines: int, det_sig, ok: bool):
         ">
           <span style="margin-left:0.6rem; opacity:0.85;">Usable {mol.upper()} lines:</span>
           <span style="font-weight:700; color:#2e7d32;"> {int(n_lines)}</span>
-          <span style="margin-left:0.9rem; opacity:0.85;">Detection:</span>
+          <span style="margin-left:0.6rem; opacity:0.85;">Detection (per transit):</span>
           <span style="font-weight:900; color:#2e7d32;"> {det_txt}</span>
+          <span style="margin-left:0.6rem; opacity:0.85;">Required transit(s):</span>
+          <span style="font-weight:900; color:#2e7d32;"> {ntr_txt}</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -435,6 +439,15 @@ def render_target_section():
                 key="prom_abs",
             )
 
+            st.number_input(
+                "Required detection significance (σ)",
+                min_value=1.0,
+                step=0.5,
+                format="%.1f",
+                key="detect_sig",
+                help="Target detection significance used to estimate the number of transits (nights) required.",
+            )
+
         with c2:
             st.number_input(
                 "Minimum number of lines",
@@ -453,14 +466,6 @@ def render_target_section():
                 format="%.2f",
                 key="detrend_p",
             )
-
-            # st.number_input(
-            #     "Required detection significance (σ)",
-            #     min_value=0.5,
-            #     step=0.5,
-            #     format="%.1f",
-            #     key="detect_sig",
-            # )
 
         # Hidden by design: valley/peak selection removed.
         # Engine is forced to peak-finding only.
@@ -775,8 +780,8 @@ def render_tab_molecules(result):
         ntr = mm.get("n_transits_req", None)
 
         if n_lines is not None:
-            ok = (spt is not None) and np.isfinite(spt)
-            render_molecule_metric_line(mol, n_lines, spt, ok)
+            render_molecule_metric_line(mol, n_lines, spt, ntr)
+
 
 def render_tab_debug(result):
     st.subheader("Debug")
