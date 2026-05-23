@@ -1,7 +1,5 @@
 # Large data folders — distributed via S3 (or symlinked locally for dev)
 stellar_models/*.csv
-molecular_templates/*.csv
-sky_models/*.fits
 
 # Python / OS
 __pycache__/
