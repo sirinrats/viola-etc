@@ -36,8 +36,8 @@ def validate_user_inputs(u: UserInputs, cfg: InstrumentConfig) -> None:
 
     if not np.isfinite(u.target.planet_line_contrast):
         raise ValueError("planet_line_contrast must be finite")
-    if not (0.0 <= u.target.planet_line_contrast <= 1.0):
-        raise ValueError("planet_line_contrast must be in [0, 1]")
+    if not (0.0 < u.target.planet_line_contrast <= 1.0):
+        raise ValueError("planet_line_contrast must be in (0, 1]")
 
     if u.obs.t_exp_s <= 0:
         raise ValueError("t_exp_s must be > 0")
@@ -52,16 +52,18 @@ def validate_user_inputs(u: UserInputs, cfg: InstrumentConfig) -> None:
     # Grid inputs (required)
     if not np.isfinite(u.obs.target_alt_deg):
         raise ValueError("target_alt_deg must be finite")
-    if not (0.0 < float(u.obs.target_alt_deg) <= 90.0):
-        raise ValueError("target_alt_deg must be in (0, 90] degrees")
+    if not (30.0 <= float(u.obs.target_alt_deg) <= 90.0):
+        raise ValueError("target_alt_deg must be in [30, 90] degrees (minimum sky model grid altitude)")
 
     if not np.isfinite(u.obs.pwv_mm):
         raise ValueError("pwv_mm must be finite")
     if float(u.obs.pwv_mm) <= 0.0:
         raise ValueError("pwv_mm must be > 0")
 
-    if not isinstance(u.target.star_name, str) or len(u.target.star_name.strip()) == 0:
-        raise ValueError("star_name must be a non-empty string")
+    if not np.isfinite(u.target.v_rv_km_s):
+        raise ValueError("v_rv_km_s must be finite")
+    if not (-2000.0 <= float(u.target.v_rv_km_s) <= 2000.0):
+        raise ValueError("v_rv_km_s must be in [-2000, 2000] km/s")
 
 
 def validate_instrument_config(cfg: InstrumentConfig) -> None:
@@ -88,8 +90,6 @@ def validate_instrument_config(cfg: InstrumentConfig) -> None:
 def validate_site_config(site: SiteConfig) -> None:
     if not isinstance(site.sky_model_base_dir, str) or len(site.sky_model_base_dir.strip()) == 0:
         raise ValueError("sky_model_base_dir must be a non-empty string")
-    if not (0.0 <= site.oh_scatter_frac <= 1.0):
-        raise ValueError("oh_scatter_frac must be in [0, 1]")
 
 
 def validate_mag_sweep(mag_min: float, mag_max: float, mag_step: float) -> None:

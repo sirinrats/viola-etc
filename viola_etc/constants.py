@@ -30,7 +30,7 @@ ARCSEC2_TO_SR: float = (np.pi / (180.0 * 3600.0)) ** 2
 FNU0_2MASS_W_M2_HZ: Dict[str, float] = {
     "J": 1.594e-23,
     "H": 1.024e-23,
-    "K": 0.667e-23,
+    "K": 0.6668e-23,
 }
 
 # =========================
@@ -54,10 +54,10 @@ PHOENIX_NEWERA_TEFF_MAX = 12000.0
 # =========================
 # PHOENIX-NewEra storage
 # =========================
-PHOENIX_NEWERA_CACHE_DIR = "./.cache/NewEra_grids_R300K"
+PHOENIX_NEWERA_CACHE_DIR = "./.cache/stellar_models"
 # For Streamlit Cloud later (S3/R2/Drive/HF). Keep empty for local dev.
 PHOENIX_NEWERA_REMOTE_BASE_URL = ""
-PHOENIX_NEWERA_GRID_DIR = "./NewEra_grids_R300K"
+PHOENIX_NEWERA_GRID_DIR = "./stellar_models"
 
 
 def get_fnu0_w_m2_hz(band: str, mag_system: str) -> float:

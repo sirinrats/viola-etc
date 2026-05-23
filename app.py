@@ -21,6 +21,16 @@ from dataclasses import replace
 # =========================
 MOLECULE_TEMPLATE_DIR = "./molecular_templates"
 
+PLANET_CLASSES = [
+    ("temperate_terrestrial", "Temperate terrestrial (~250 K, rocky)"),
+    ("temperate_subneptune",  "Temperate sub-Neptune (~270 K, H2-dominated)"),
+    ("warm_subneptune",       "Warm sub-Neptune (~600 K)"),
+    ("hot_jupiter",           "Hot Jupiter (~1500 K)"),
+    ("ultra_hot_jupiter",     "Ultra-hot Jupiter (~2500 K)"),
+]
+PLANET_CLASS_KEYS = [k for k, _ in PLANET_CLASSES]
+PLANET_CLASS_LABELS = {k: lbl for k, lbl in PLANET_CLASSES}
+
 
 # =========================
 # Defaults
@@ -42,9 +52,11 @@ BASE_DEFAULTS = {
     "mag_system": "Vega",
     "m_mag": 8.0,
     "T_star_K": 5800,
+    "v_rv_km_s": 0.0,
     "source_sed": "Blackbody",
     # toggles
     "include_planet_detection": False,
+    "planet_class": "temperate_subneptune",
     # observing
     "t_exp_s": 120,
     "n_exp": 50,
@@ -71,8 +83,10 @@ INPUT_KEYS = [
     "mag_system",
     "m_mag",
     "T_star_K",
+    "v_rv_km_s",
     "source_sed",
     "include_planet_detection",
+    "planet_class",
     # detection
     "planet_line_contrast",
     "prom_abs",
@@ -377,6 +391,16 @@ def render_target_section():
         key="T_star_K",
     )
 
+    st.number_input(
+        "Stellar radial velocity (km/s)",
+        min_value=-2000.0,
+        max_value=2000.0,
+        step=1.0,
+        format="%.1f",
+        key="v_rv_km_s",
+        help="",
+    )
+
     with st.expander("Target (advanced)", expanded=st.session_state.target_adv_open):
         st.session_state.target_adv_open = True
 
@@ -404,6 +428,14 @@ def render_target_section():
         force = bool(st.session_state.pop("_det_force_reset", False))
         seed_detection_defaults(force_reset=force)
 
+        st.selectbox(
+            "Planet class",
+            options=PLANET_CLASS_KEYS,
+            format_func=lambda k: PLANET_CLASS_LABELS.get(k, k),
+            key="planet_class",
+            help="Each class assumes a different equilibrium temperature and atmospheric composition. See Appendix B of the technical documentation for the species list per class.",
+        )
+
         st.number_input(
             "Planet-to-star line contrast",
             min_value=1e-14,
@@ -411,12 +443,11 @@ def render_target_section():
             step=1e-5,
             format="%.1e",
             key="planet_line_contrast",
-            help="Order-of-magnitude contrast used for detectability estimates.",
         )
 
         st.markdown("**Detection thresholds**")
         st.caption(
-            "These parameters control how strictly template lines are selected and what detection significance is required."
+            "These parameters control how strictly template lines are selected and how many observing nights are required."
         )
 
         c1, c2 = st.columns(2)
@@ -445,7 +476,6 @@ def render_target_section():
                 step=0.5,
                 format="%.1f",
                 key="detect_sig",
-                help="Target detection significance used to estimate the number of transits (nights) required.",
             )
 
         with c2:
@@ -507,7 +537,7 @@ def render_observing_section():
     with c5:
         st.number_input(
             "Target altitude (deg)",
-            min_value=1.0,
+            min_value=30.0,
             max_value=90.0,
             step=1.0,
             format="%.0f",
@@ -583,6 +613,7 @@ def run_etc_if_clicked(run_clicked: bool):
         m_mag=float(st.session_state.m_mag),
         source_sed=normalize_sed_name(st.session_state.source_sed),
         T_star_K=float(st.session_state.T_star_K),
+        v_rv_km_s=float(st.session_state.v_rv_km_s),
         planet_line_contrast=float(st.session_state.planet_line_contrast),
     )
 
@@ -609,14 +640,13 @@ def run_etc_if_clicked(run_clicked: bool):
         mag_sweep_step=float(st.session_state.mag_sweep_step),
         molecule_dir=MOLECULE_TEMPLATE_DIR,
         enable_molecules=bool(st.session_state.include_planet_detection),
+        class_name=str(st.session_state.planet_class),
         prom_abs=float(st.session_state.prom_abs),
         snr_thresh=float(st.session_state.snr_thresh),
-        n_frames_per_transit=int(st.session_state.n_exp),
         detrend_p=float(st.session_state.detrend_p),
         detect_sig=float(st.session_state.detect_sig),
         min_lines_for_calc=int(st.session_state.min_lines_for_calc),
         # Forced behavior: peak finding only
-        find_valleys=False,
     )
 
     try:
@@ -650,6 +680,39 @@ def render_tab_result(result):
     # --- Plots
     lam = getattr(result, "lam_um", None)
     snr = getattr(result, "snr_res", None)
+
+    want_download = st.checkbox("Download plot data", key="download_snr_csv")
+
+    if want_download and lam is not None and snr is not None:
+        import io, base64
+        csv_buf = io.StringIO()
+        csv_buf.write("wavelength_um,snr_per_resolution\n")
+        for w, s in zip(lam, snr):
+            csv_buf.write(f"{w},{s}\n")
+        b64 = base64.b64encode(csv_buf.getvalue().encode()).decode()
+        filename = f"snr_vs_wavelength_{band_used}band.csv"
+        st.markdown(
+            f"""
+            <a href="data:text/csv;base64,{b64}" download="{filename}" style="
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: 0.5rem 1.25rem;
+                background: #2563EB;
+                color: white;
+                border-radius: 0.5rem;
+                font-weight: 600;
+                font-size: 0.875rem;
+                text-decoration: none;
+                box-shadow: 0 2px 6px rgba(37,99,235,0.35);
+                margin-top: 0.25rem;
+            ">
+                &#8681;&nbsp; {filename}
+            </a>
+            """,
+            unsafe_allow_html=True,
+        )
+
     if lam is not None and snr is not None:
         lam = np.asarray(lam, float)
         snr = np.asarray(snr, float)
@@ -691,13 +754,35 @@ def render_tab_sky(result):
         return
     lam = np.asarray(lam, float)
 
-    for arr_name, title, ylabel in [
-        ("trans", f"Atmospheric transmission ({band_used}-band)", "Atmospheric transmission"),
-        ("zl", f"Zodiacal emission ({band_used}-band)", "Sky emission [ph s^-1 m^-2 μm^-1 arcsec^-2]"),
-        ("oh", f"OH airglow ({band_used}-band)", "Emission [ph s^-1 m^-2 μm^-1 arcsec^-2]"),
-        ("sml", f"Scattered moonlight ({band_used}-band)", "Emission [ph s^-1 m^-2 μm^-1 arcsec^-2]"),
-    ]:
-        plot_simple_from_result(result, lam, arr_name, title, ylabel)
+    sky = getattr(result, "sky", None)
+
+    # Atmospheric transmission (total — on result directly)
+    plot_simple_from_result(result, lam, "trans",
+                            f"Total atmospheric transmission ({band_used}-band)",
+                            "Atmospheric transmission")
+
+    # Transmission breakdown (from SkyCalc per-process columns)
+    if sky is not None:
+        TRANS_COMPONENTS = [
+            ("trans_ma", f"Molecular absorption transmission ({band_used}-band)",  "Transmission"),
+            ("trans_o3", f"Ozone absorption transmission ({band_used}-band)",      "Transmission"),
+            ("trans_rs", f"Rayleigh scattering transmission ({band_used}-band)",   "Transmission"),
+            ("trans_ms", f"Mie scattering transmission ({band_used}-band)",        "Transmission"),
+        ]
+        for field_name, title, ylabel in TRANS_COMPONENTS:
+            plot_simple_from_result(sky, lam, field_name, title, ylabel)
+
+        SKY_COMPONENTS = [
+            ("sky_phi",  f"Total sky emission ({band_used}-band)",          "Sky emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
+            ("flux_zl",  f"Zodiacal light ({band_used}-band)",              "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
+            ("flux_ael", f"Airglow emission lines ({band_used}-band)",      "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
+            ("flux_arc", f"Airglow residual continuum ({band_used}-band)",  "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
+            ("flux_tme", f"Molecular emission of lower atmosphere ({band_used}-band)",          "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
+            ("flux_sml", f"Scattered moonlight ({band_used}-band)",         "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
+            ("flux_ssl", f"Scattered starlight ({band_used}-band)",         "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
+        ]
+        for field_name, title, ylabel in SKY_COMPONENTS:
+            plot_simple_from_result(sky, lam, field_name, title, ylabel)
 
 
 def render_tab_signal_noise(result, cfg: InstrumentConfig):
@@ -767,7 +852,8 @@ def render_tab_molecules(result):
         h1, l1 = ax1.get_legend_handles_labels()
         h2, l2 = ax2.get_legend_handles_labels()
         ax1.legend(h1 + h2, l1 + l2, loc="best", fontsize=9)
-        ax1.set_title(f"{mol.upper()}")
+        band_used, _ = get_run_context()
+        ax1.set_title(f"{mol.upper()} ({band_used}-band)")
 
         try:
             fig.tight_layout()
@@ -812,7 +898,38 @@ def main():
     layout="centered", 
     )
 
-    st.header("VIOLA Exposure Time Calculator -- Ver 0.4 🌈 ", divider="rainbow")
+    st.header("VIOLA Exposure Time Calculator -- Ver 0.5 🌈 ", divider="rainbow")
+
+    with st.sidebar:
+        st.markdown("### VIOLA ETC")
+        st.markdown(
+            """
+            <a href="https://github.com/YOUR_USERNAME/YOUR_REPO" target="_blank" style="
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                padding: 0.45rem 1.1rem;
+                background: #2563EB;
+                color: white;
+                border-radius: 0.5rem;
+                font-weight: 600;
+                font-size: 0.875rem;
+                text-decoration: none;
+                box-shadow: 0 2px 6px rgba(37,99,235,0.35);
+                margin-bottom: 0.5rem;
+            ">
+                &#128196;&nbsp; Documentation
+            </a>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("<div style='margin-top: 0.6rem;'></div>", unsafe_allow_html=True)
+        st.markdown(
+            "📧 Contact: [sirinrat@narit.or.th](mailto:sirinrat@narit.or.th)",
+            unsafe_allow_html=True,
+        )
+        st.divider()
+        st.caption("Ver 0.5 · VIOLA ETC")
 
     render_target_section()
     render_observing_section()

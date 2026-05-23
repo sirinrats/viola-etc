@@ -1,15 +1,38 @@
+# Large data folders — distributed via S3 (or symlinked locally for dev)
+stellar_models/*.csv
+molecular_templates/*.csv
+sky_models/*.fits
+
+# Python / OS
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .DS_Store
-.streamlit/
+.cache/
+.ipynb_checkpoints/
+
+# Streamlit secrets (NEVER commit)
 .streamlit/secrets.toml
-.env
+
+# Virtual environments
 .venv/
 venv/
-*.log
-NewEra_grids_R300K/
-.cache/
-.cache/**
-*.cache/
-z_bkup/
-legacy/v0_2/
+env/
+
+# Office lock files
+~$*
+
+# Editor
+.vscode/
+.idea/
+
+# Technical documentation — only the PDF ships to GitHub
+# This covers viola_etc.tex, build artifacts (.aux, .log, ...), the bib/ folder,
+# and figures/.  Only *.pdf at the top level of the folder is tracked.
+VIOLA_ETC_Technical_Documentation/*
+!VIOLA_ETC_Technical_Documentation/
+!VIOLA_ETC_Technical_Documentation/*.pdf
+# Also explicitly cover the .bib files and BibTeX build artifacts
+VIOLA_ETC_Technical_Documentation/bib/
+*.bbl
+*.blg

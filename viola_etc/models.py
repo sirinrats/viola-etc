@@ -13,7 +13,10 @@ This module defines:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from .observing.sky_io import SkyData
 
 import numpy as np
 
@@ -31,16 +34,18 @@ class TargetParams:
     mag_system: str           # 'Vega' or 'AB'
     m_mag: float              # magnitude in chosen band/system
 
-    # Used for molecule template filenames
-    star_name: str = "HD21520b"
-
     # SED selector:
-    # - "blackbody": Planck shape (anchored to band magnitude)
-    # - "phoenix"  : placeholder (treated as flat Fnu)
+    # - "blackbody"      : Planck shape (anchored to band magnitude)
+    # - "phoenix-newera" : PHOENIX-NewEra grid (Teff 2300–12000 K); falls back to blackbody if out of range
+    # - "phoenix"        : legacy alias for "phoenix-newera"
     source_sed: str = "blackbody"
 
-    # used by blackbody shape
+    # stellar effective temperature — used to shape the blackbody SED or select the PHOENIX-NewEra grid file
     T_star_K: float = 5800.0
+
+    # stellar radial velocity — shifts PHOENIX-NewEra lines relative to tellurics;
+    # also adjusts the blackbody continuum shape (rest-frame evaluation); positive = redshift
+    v_rv_km_s: float = 0.0
 
     # detection knob
     planet_line_contrast: float = 1e-4
@@ -80,17 +85,17 @@ class InstrumentConfig:
         "tau_frd": 0.90,
         "doublet": 0.96,
         "collimator": 0.90,
-        "echelle": 0.90,
+        "vipa": 0.90,
         "x_disp": 0.80,
         "camera": 0.90,
-        "detector": 0.80,
+        "detector": 0.95,
     })
 
     # thermal & detector
-    t_ambient_k: float = 275.0
-    epsilon_eff: float = 0.03
-    rn_e: float = 20.0
-    dark_rate: float = 0.01
+    t_ambient_k: float = 275.0            # instrument ambient temperature [K]
+    epsilon_eff: float = 0.10             # effective emissivity for thermal background calculation
+    rn_e: float = 20.0                    # read noise [e- per pixel per read]
+    dark_rate: float = 0.01               # dark current [e- per second per pixel]
 
 
 @dataclass(frozen=True)
@@ -99,7 +104,6 @@ class SiteConfig:
     Site / sky model defaults (hidden).
     """
     sky_model_base_dir: str = "./sky_models"
-    oh_scatter_frac: float = 0.10
 
 
 def get_default_instrument_config() -> InstrumentConfig:
@@ -159,10 +163,7 @@ class ETCResult:
 
     lam_um: Optional[np.ndarray] = None
     trans: Optional[np.ndarray] = None
-    zl: Optional[np.ndarray] = None
-    oh: Optional[np.ndarray] = None
-    sml: Optional[np.ndarray] = None
-    sky_phi_um_arcsec2: Optional[np.ndarray] = None
+    sky: Optional["SkyData"] = None   # all sky arrays; see sky_io.SkyData
 
     # signal/noise/SNR arrays (per res el unless stated)
     signal_res_e: Optional[np.ndarray] = None

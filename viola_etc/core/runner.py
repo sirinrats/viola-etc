@@ -47,6 +47,7 @@ from .validate import (
     validate_user_inputs,
 )
 from ..observing.sky_io import (
+    SkyData,
     check_sky_grid_vs_resolution,
     get_sky_fits_path,
     load_skytable,
@@ -139,13 +140,12 @@ def run_etc(
     molecule_dir: str = "./molecular_templates",
     enable_molecules: bool = True,
     # molecule knobs
+    class_name: Optional[str] = None,
     prom_abs: float = 0.05,
     snr_thresh: float = 100.0,
-    n_frames_per_transit: int = 50,
     detrend_p: float = 0.5,
     detect_sig: float = 5.0,
     min_lines_for_calc: int = 50,
-    find_valleys: bool = False,
 ) -> ETCResult:
     """
     Main ETC entry point.
@@ -181,18 +181,22 @@ def run_etc(
     # Load atmosphere/sky model
     # -------------------------
     sky_fits_path = get_sky_fits_path(
-    site,
-    u.obs.sky_model_name,
-    target_alt_deg=u.obs.target_alt_deg,
-    pwv_mm=u.obs.pwv_mm,
+        site,
+        u.obs.sky_model_name,
+        target_alt_deg=u.obs.target_alt_deg,
+        pwv_mm=u.obs.pwv_mm,
     )
 
-    lam_um_arr, trans_arr, zl_arr, oh_arr, sml_arr, sky_phi_um_arcsec2 = load_skytable(
+    sky: SkyData = load_skytable(
         sky_fits_path=sky_fits_path,
         band=band,
         cfg=cfg,
-        oh_scatter_frac=site.oh_scatter_frac,
     )
+
+    # Local aliases — keep the rest of the function readable
+    lam_um_arr = sky.lam_um
+    trans_arr  = sky.trans
+
     grid_stats = check_sky_grid_vs_resolution(lam_um_arr, cfg.resolving_power)
 
     # -------------------------
@@ -211,6 +215,7 @@ def run_etc(
         source_sed=u.target.source_sed,
         T_star_K=u.target.T_star_K,
         phoenix_newera_dir=None,
+        v_rv_km_s=u.target.v_rv_km_s,
     )
 
 
@@ -253,23 +258,15 @@ def run_etc(
     omega_res_sr = omega_res_arcsec2 * ARCSEC2_TO_SR
 
     # --- Sky emission background (origin: atmosphere) ---
-    # IMPORTANT subtlety:
-    # - If sky_phi_um_arcsec2 is already the sky brightness at the telescope (ground),
-    #   should NOT multiply by trans_arr again.
-    # - Current behavior multiplies by trans_arr (kept for backward compatibility).
-    #
-    # If later confirm sky_phi is "at ground", change:
-    #     tau_sky_path_arr = tau_opt
-    # instead of:
-    #     tau_sky_path_arr = tau_opt * trans_arr
-    tau_sky_path_arr = tau_opt * trans_arr
-
+    # sky.sky_phi is ground-level brightness from SkyCalc (atmosphere already
+    # accounted for in each component).  Sky photons pass through instrument
+    # optics only (tau_opt) — no additional trans_arr factor.
     sky_res_rate_arr = (
         area_m2
         * omega_res_arcsec2
-        * tau_sky_path_arr
+        * tau_opt
         * delta_lambda_um_arr
-        * sky_phi_um_arcsec2
+        * sky.sky_phi
     )
     N_sky_arr = sky_res_rate_arr * t_total_s
 
@@ -287,7 +284,7 @@ def run_etc(
 
     # --- Variances ---
     V_bg_poisson_arr = pair_factor * (N_sky_arr + N_th_arr + N_dark_arr)
-    V_read = pair_factor * (cfg.rn_e**2) * u.obs.n_exp * n_pix_per_res
+    V_read = (cfg.rn_e**2) * u.obs.n_exp * n_pix_per_res
     V_sig_arr = s_res_arr
 
     V_total_arr = V_sig_arr + V_bg_poisson_arr + V_read
@@ -296,11 +293,10 @@ def run_etc(
     # =========================
     # Median SNR vs magnitude
     # =========================
-    V_bg_base_arr = pair_factor * (N_sky_arr + N_th_arr + N_dark_arr)
     mag_grid, snr_med_grid = build_snr_mag_sweep(
         s_res_arr=s_res_arr,
         m_mag=u.target.m_mag,
-        V_bg_base_arr=V_bg_base_arr,
+        V_bg_base_arr=V_bg_poisson_arr,
         V_read=V_read,
         mag_min=mag_sweep_min,
         mag_max=mag_sweep_max,
@@ -314,7 +310,6 @@ def run_etc(
     mol_metrics: Dict[str, Dict[str, Any]] = {}
 
     if enable_molecules:
-        # Signature-safe call (prevents passing unsupported kwargs like star_name)
         sig = inspect.signature(load_molecule_templates)
         lt_kwargs: Dict[str, Any] = {}
 
@@ -338,16 +333,17 @@ def run_etc(
         elif "template_dir" in sig.parameters:
             lt_kwargs["template_dir"] = molecule_dir
 
-        # molecules list
-        default_mols = ("CH4", "H2O", "CO2", "CO")
+        # molecules list — superset across all v0.5 planet classes;
+        # load_molecule_templates silently skips ones with no matching file
+        default_mols = ("CH4", "CO", "CO2", "H2O", "NH3", "O2", "OH")
         if "molecules" in sig.parameters:
             lt_kwargs["molecules"] = default_mols
         elif "mols" in sig.parameters:
             lt_kwargs["mols"] = default_mols
 
-        # star_name ONLY if supported
-        if "star_name" in sig.parameters:
-            lt_kwargs["star_name"] = getattr(u.target, "star_name", "")
+        # v0.5 grid: filter to a specific planet class if supported
+        if "class_name" in sig.parameters and class_name:
+            lt_kwargs["class_name"] = class_name
 
         mol_templates = load_molecule_templates(**lt_kwargs)
 
@@ -359,12 +355,10 @@ def run_etc(
                 nx=cfg.nx,
                 prom_abs=prom_abs,
                 snr_thresh=snr_thresh,
-                n_frames_per_transit=n_frames_per_transit,
                 detrend_p=detrend_p,
                 line_contrast=u.target.planet_line_contrast,
                 detect_sig=detect_sig,
                 min_lines_for_calc=min_lines_for_calc,
-                find_valleys=find_valleys,
             )
         else:
             mol_metrics = {}
@@ -398,7 +392,7 @@ def run_etc(
 
 
     if np.isfinite(ratio) and ratio > 1.5:
-        summary_lines.append("!!!! Grid is coarse vs instrument resolution; OH/telluric features may be mis-estimated.")
+        summary_lines.append("!!!! Grid is coarse vs instrument resolution; telluric features may be mis-estimated.")
 
     if enable_molecules:
         if mol_templates:
@@ -434,6 +428,7 @@ def run_etc(
         "sed_fallback_reason": sed_meta.get("sed_fallback_reason"),
         "phoenix_file": sed_meta.get("phoenix_file"),
         "phoenix_teff_selected_k": sed_meta.get("phoenix_teff_selected_k"),
+        "v_rv_km_s": float(u.target.v_rv_km_s),
         "tau_slit": float(tau_slit),
         "omega_res_arcsec2": float(omega_res_arcsec2),
         "read_variance_e2": float(V_read),
@@ -447,13 +442,12 @@ def run_etc(
         "mag_sweep_step": float(mag_sweep_step),
         "molecule_dir": str(molecule_dir),
         "enable_molecules": bool(enable_molecules),
+        "class_name": class_name if class_name else "",
         "prom_abs": float(prom_abs),
         "snr_thresh": float(snr_thresh),
-        "n_frames_per_transit": int(n_frames_per_transit),
         "detrend_p": float(detrend_p),
         "detect_sig": float(detect_sig),
         "min_lines_for_calc": int(min_lines_for_calc),
-        "find_valleys": bool(find_valleys),
     }
 
     return ETCResult(
@@ -461,10 +455,7 @@ def run_etc(
         summary_lines=summary_lines,
         lam_um=lam_um_arr,
         trans=trans_arr,
-        zl=zl_arr,
-        oh=oh_arr,
-        sml=sml_arr,
-        sky_phi_um_arcsec2=sky_phi_um_arcsec2,
+        sky=sky,
         signal_res_e=s_res_arr,
         signal_pix_e=s_pix_arr,
         sky_res_e=N_sky_arr,

@@ -1,16 +1,15 @@
 """
-viola_etc/photometry.py
+viola_etc/target/photometry.py
 
 Photometry + Planck helper functions.
 
 Notes:
-- mag -> Fnu uses constants.get_fnu0_w_m2_hz 
+- mag -> Fnu uses constants.get_fnu0_w_m2_hz
 - Planck functions are pure physics helpers
 """
 
 from __future__ import annotations
 from pathlib import Path
-import re
 import numpy as np
 
 from ..constants import (
@@ -70,17 +69,6 @@ def planck_bnu_W_m2_hz_sr(nu_hz: np.ndarray, T_K: float) -> np.ndarray:
     x = (H_J_S * nu_hz) / (K_B_J_K * float(T_K))
     return (2.0 * H_J_S * nu_hz**3 / C_M_S**2) / np.expm1(x)
 
-def _parse_newera_teff_from_name(name: str) -> int | None:
-    """
-    Extract Teff from filenames like:
-      lte02300-4.50-0.0.PHOENIX-NewEra-ACES-COND-2023.HSR.csv
-    """
-    m = re.search(r"lte(\d{5})", name)
-    if not m:
-        return None
-    return int(m.group(1))
-
-
 def _read_newera_csv(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """
     CSV columns: wl_A, flux
@@ -123,6 +111,7 @@ def stellar_flambda_um_arr(
     source_sed: str,
     T_star_K: float,
     phoenix_newera_dir: str | None = None,
+    v_rv_km_s: float = 0.0,
 ) -> tuple[np.ndarray, dict]:
     """
     Build stellar F_lambda(λ) on the ETC wavelength grid.
@@ -151,7 +140,7 @@ def stellar_flambda_um_arr(
     sed_requested = str(source_sed).strip().lower()
     sed = sed_requested
 
-    # Treat legacy "phoenix" as NewEra intent in v0.4
+    # Treat legacy "phoenix" alias as NewEra
     if sed == "phoenix":
         sed = "phoenix-newera"
 
@@ -171,14 +160,22 @@ def stellar_flambda_um_arr(
             sed = "blackbody"
             sed_meta["sed_used"] = sed
 
-    # --- Blackbody
+    # Blackbody
     if sed == "blackbody":
-        B_ref = float(planck_blambda_W_m2_um_sr(np.array([lam_ref_um]), float(T_star_K))[0])
-        B_arr = planck_blambda_W_m2_um_sr(lam_um_arr, float(T_star_K))
+        if float(v_rv_km_s) != 0.0:
+            beta = float(v_rv_km_s) / (C_M_S * 1e-3)
+            D = float(np.sqrt((1.0 + beta) / (1.0 - beta)))
+            lam_eval_um = lam_um_arr / D
+            lam_ref_eval_um = lam_ref_um / D
+        else:
+            lam_eval_um = lam_um_arr
+            lam_ref_eval_um = lam_ref_um
+        B_ref = float(planck_blambda_W_m2_um_sr(np.array([lam_ref_eval_um]), float(T_star_K))[0])
+        B_arr = planck_blambda_W_m2_um_sr(lam_eval_um, float(T_star_K))
         F_lambda_um_arr = F_lambda_ref_um * (B_arr / B_ref)
         return F_lambda_um_arr, sed_meta
 
-    # --- PHOENIX-NewEra (local OR cache+download)
+    # PHOENIX-NewEra (local OR cache+download)
     if sed == "phoenix-newera":
         teff_list_json = Path(__file__).resolve().parents[1] / "assets" / "newera_teff_list.json"
 
@@ -209,6 +206,13 @@ def stellar_flambda_um_arr(
         idx = np.argsort(wl_um_grid)
         wl_um_grid = wl_um_grid[idx]
         F_lambda_um_grid = F_lambda_um_grid[idx]
+
+        # Relativistic Doppler shift: λ_obs = λ_rest × sqrt((1 + β)/(1 - β))
+        # Shifts stellar absorption lines relative to the telluric grid.
+        # Only affects PHOENIX-NewEra (blackbody has no spectral features).
+        if float(v_rv_km_s) != 0.0:
+            beta = float(v_rv_km_s) / (C_M_S * 1e-3)
+            wl_um_grid = wl_um_grid * np.sqrt((1.0 + beta) / (1.0 - beta))
 
         # interpolate onto ETC grid
         F_lambda_um_arr = np.interp(
