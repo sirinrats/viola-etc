@@ -904,7 +904,7 @@ def main():
         st.markdown("### VIOLA ETC")
         st.markdown(
             """
-            <a href="https://github.com/sirinrats/viola-etc/blob/main/VIOLA_ETC_Technical_Documentation/viola_etc.pdf" target="_blank" style="
+            <a href="https://github.com/sirinrats/viola-etc/blob/main/documents/viola_etc_technical.pdf" target="_blank" style="
                 display: inline-flex;
                 align-items: center;
                 gap: 0.4rem;

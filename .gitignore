@@ -27,9 +27,9 @@ env/
 # Technical documentation — only the PDF ships to GitHub
 # This covers viola_etc.tex, build artifacts (.aux, .log, ...), the bib/ folder,
 # and figures/.  Only *.pdf at the top level of the folder is tracked.
-VIOLA_ETC_Technical_Documentation/*
-!VIOLA_ETC_Technical_Documentation/
-!VIOLA_ETC_Technical_Documentation/*.pdf
+documents/*
+!documents/
+!documents/*.pdf
 # Also explicitly cover the .bib files and BibTeX build artifacts
 VIOLA_ETC_Technical_Documentation/bib/
 *.bbl
