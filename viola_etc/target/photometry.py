@@ -69,6 +69,35 @@ def planck_bnu_W_m2_hz_sr(nu_hz: np.ndarray, T_K: float) -> np.ndarray:
     x = (H_J_S * nu_hz) / (K_B_J_K * float(T_K))
     return (2.0 * H_J_S * nu_hz**3 / C_M_S**2) / np.expm1(x)
 
+
+def _blackbody_flambda_anchored(
+    lam_um_arr: np.ndarray,
+    lam_ref_um: float,
+    F_lambda_ref_um: float,
+    T_star_K: float,
+    v_rv_km_s: float = 0.0,
+) -> np.ndarray:
+    """
+    Blackbody F_lambda [W m^-2 um^-1] on lam_um_arr, anchored so the value at
+    lam_ref_um equals F_lambda_ref_um (the magnitude-derived flux).
+
+    A non-zero v_rv_km_s applies the relativistic continuum shift by evaluating
+    the Planck shape at rest-frame wavelengths (lambda_obs / D). The effect on a
+    featureless continuum is small but kept for consistency with the PHOENIX path.
+    """
+    if float(v_rv_km_s) != 0.0:
+        beta = float(v_rv_km_s) / (C_M_S * 1e-3)
+        D = float(np.sqrt((1.0 + beta) / (1.0 - beta)))
+        lam_eval_um = lam_um_arr / D
+        lam_ref_eval_um = lam_ref_um / D
+    else:
+        lam_eval_um = lam_um_arr
+        lam_ref_eval_um = lam_ref_um
+    B_ref = float(planck_blambda_W_m2_um_sr(np.array([lam_ref_eval_um]), float(T_star_K))[0])
+    B_arr = planck_blambda_W_m2_um_sr(lam_eval_um, float(T_star_K))
+    return F_lambda_ref_um * (B_arr / B_ref)
+
+
 def _read_newera_csv(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """
     CSV columns: wl_A, flux
@@ -122,14 +151,15 @@ def stellar_flambda_um_arr(
         - sed_requested
         - sed_used
         - sed_fallback_reason (optional)
-        - phoenix_teff_selected_k (optional; filled later when grids implemented)
+        - phoenix_file (optional; PHOENIX path only)
+        - phoenix_teff_selected_k (optional; PHOENIX path only)
+        - phoenix_download_url (optional; only when the grid was downloaded)
     """
     lam_um_arr = np.asarray(lam_um_arr, dtype=float)
 
     # magnitude scale (TOA Fnu)
     fnu = mag_to_fnu_w_m2_hz(float(m_mag), band, mag_system)
 
-    lam_m_arr = lam_um_arr * UM_TO_M
     lam_ref_um = float(np.nanmedian(lam_um_arr))
     lam_ref_m = lam_ref_um * UM_TO_M
 
@@ -162,17 +192,9 @@ def stellar_flambda_um_arr(
 
     # Blackbody
     if sed == "blackbody":
-        if float(v_rv_km_s) != 0.0:
-            beta = float(v_rv_km_s) / (C_M_S * 1e-3)
-            D = float(np.sqrt((1.0 + beta) / (1.0 - beta)))
-            lam_eval_um = lam_um_arr / D
-            lam_ref_eval_um = lam_ref_um / D
-        else:
-            lam_eval_um = lam_um_arr
-            lam_ref_eval_um = lam_ref_um
-        B_ref = float(planck_blambda_W_m2_um_sr(np.array([lam_ref_eval_um]), float(T_star_K))[0])
-        B_arr = planck_blambda_W_m2_um_sr(lam_eval_um, float(T_star_K))
-        F_lambda_um_arr = F_lambda_ref_um * (B_arr / B_ref)
+        F_lambda_um_arr = _blackbody_flambda_anchored(
+            lam_um_arr, lam_ref_um, F_lambda_ref_um, float(T_star_K), v_rv_km_s
+        )
         return F_lambda_um_arr, sed_meta
 
     # PHOENIX-NewEra (local OR cache+download)
@@ -229,9 +251,9 @@ def stellar_flambda_um_arr(
             if not np.any(good):
                 # grid does not cover the band -> fallback to blackbody
                 sed_meta["sed_fallback_reason"] = "NewEra grid does not cover band; falling back to Blackbody"
-                B_ref = float(planck_blambda_W_m2_um_sr(np.array([lam_ref_um]), float(T_star_K))[0])
-                B_arr = planck_blambda_W_m2_um_sr(lam_um_arr, float(T_star_K))
-                F_lambda_um_arr = F_lambda_ref_um * (B_arr / B_ref)
+                F_lambda_um_arr = _blackbody_flambda_anchored(
+                    lam_um_arr, lam_ref_um, F_lambda_ref_um, float(T_star_K), v_rv_km_s
+                )
                 sed_meta["sed_used"] = "blackbody"
                 return F_lambda_um_arr, sed_meta
 
@@ -244,9 +266,9 @@ def stellar_flambda_um_arr(
         F_ref_grid = float(np.interp(lam_ref_um, wl_um_grid, F_lambda_um_grid))
         if (not np.isfinite(F_ref_grid)) or (F_ref_grid <= 0):
             sed_meta["sed_fallback_reason"] = f"Invalid NewEra reference flux in {Path(fpath).name}; falling back to Blackbody"
-            B_ref = float(planck_blambda_W_m2_um_sr(np.array([lam_ref_um]), float(T_star_K))[0])
-            B_arr = planck_blambda_W_m2_um_sr(lam_um_arr, float(T_star_K))
-            F_lambda_um_arr = F_lambda_ref_um * (B_arr / B_ref)
+            F_lambda_um_arr = _blackbody_flambda_anchored(
+                lam_um_arr, lam_ref_um, F_lambda_ref_um, float(T_star_K), v_rv_km_s
+            )
             sed_meta["sed_used"] = "blackbody"
             return F_lambda_um_arr, sed_meta
 
@@ -259,9 +281,4 @@ def stellar_flambda_um_arr(
             sed_meta["phoenix_download_url"] = str(dl_url)
 
         return F_lambda_um_arr, sed_meta
-
-
-    # safety fallback (should not reach here)
-    F_lambda_um_arr = (C_M_S / lam_m_arr**2) * fnu * 1e-6
-    return F_lambda_um_arr, sed_meta
 

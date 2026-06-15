@@ -3,6 +3,9 @@ import streamlit as st
 import matplotlib.pyplot as plt
 from PIL import Image
 
+# Thinner plot lines (default is 1.5) — better for the dense, fine-structure spectra
+plt.rcParams["lines.linewidth"] = 0.8
+
 from viola_etc.constants import MAG_SWEEP_MIN, MAG_SWEEP_MAX, MAG_SWEEP_STEP
 from viola_etc.models import (
     TargetParams,
@@ -76,6 +79,10 @@ DET_DEFAULTS = {
     "detect_sig": 5.0,             # float
     "min_lines_for_calc": 50,      # int
 }
+
+# Detection params where a glitched 0 should be reverted to the default.
+# prom_abs / detrend_p / snr_thresh legitimately accept 0, so they are excluded.
+_RESET_IF_ZERO = {"planet_line_contrast", "detect_sig", "min_lines_for_calc"}
 
 INPUT_KEYS = [
     # target
@@ -180,7 +187,9 @@ def seed_detection_defaults(force_reset: bool = False):
             else:
                 _coerce_numeric(k, v)
                 cur = st.session_state.get(k)
-                if isinstance(cur, (int, float)) and (cur == 0 or cur <= 1e-14):
+                # Only revert a glitched 0 for params where 0 is invalid.
+                if (k in _RESET_IF_ZERO and isinstance(cur, (int, float))
+                        and (cur == 0 or cur <= 1e-14)):
                     st.session_state[k] = v
 
 
@@ -191,10 +200,8 @@ def normalize_sed_name(x: str) -> str:
     """
     s = str(x).strip().lower()
     s = s.replace("_", "-").replace(" ", "")
-    if "phoenix" in s and "newera" in s:
-        return "phoenix-newera"
     if "phoenix" in s:
-        return "phoenix-newera"  # treat any phoenix UI as NewEra in v0.4
+        return "phoenix-newera"  # any PHOENIX UI label maps to NewEra in v0.5
     return "blackbody"
 
 
@@ -322,9 +329,9 @@ def render_molecule_metric_line(mol: str, n_lines: int, det_sig, ntr):
         ">
           <span style="margin-left:0.6rem; opacity:0.85;">Usable {mol.upper()} lines:</span>
           <span style="font-weight:700; color:#2e7d32;"> {int(n_lines)}</span>
-          <span style="margin-left:0.6rem; opacity:0.85;">Detection (per transit):</span>
+          <span style="margin-left:0.6rem; opacity:0.85;">Detection (per night):</span>
           <span style="font-weight:900; color:#2e7d32;"> {det_txt}</span>
-          <span style="margin-left:0.6rem; opacity:0.85;">Required transit(s):</span>
+          <span style="margin-left:0.6rem; opacity:0.85;">Required night(s):</span>
           <span style="font-weight:900; color:#2e7d32;"> {ntr_txt}</span>
         </div>
         """,
@@ -364,8 +371,6 @@ def last_run_bool(key: str, default: bool = False) -> bool:
 # =========================
 def render_target_section():
     st.subheader("🌟 Target")
-
-    # To do: extended source, emission lines+doppler
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -772,14 +777,15 @@ def render_tab_sky(result):
         for field_name, title, ylabel in TRANS_COMPONENTS:
             plot_simple_from_result(sky, lam, field_name, title, ylabel)
 
+        _EMISSION_UNIT = r"[ph s$^{-1}$ m$^{-2}$ $\mu$m$^{-1}$ arcsec$^{-2}$]"
         SKY_COMPONENTS = [
-            ("sky_phi",  f"Total sky emission ({band_used}-band)",          "Sky emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
-            ("flux_zl",  f"Zodiacal light ({band_used}-band)",              "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
-            ("flux_ael", f"Airglow emission lines ({band_used}-band)",      "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
-            ("flux_arc", f"Airglow residual continuum ({band_used}-band)",  "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
-            ("flux_tme", f"Molecular emission of lower atmosphere ({band_used}-band)",          "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
-            ("flux_sml", f"Scattered moonlight ({band_used}-band)",         "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
-            ("flux_ssl", f"Scattered starlight ({band_used}-band)",         "Emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]"),
+            ("sky_phi",  f"Total sky emission ({band_used}-band)",          f"Sky emission {_EMISSION_UNIT}"),
+            ("flux_zl",  f"Zodiacal light ({band_used}-band)",              f"Emission {_EMISSION_UNIT}"),
+            ("flux_ael", f"Airglow emission lines ({band_used}-band)",      f"Emission {_EMISSION_UNIT}"),
+            ("flux_arc", f"Airglow residual continuum ({band_used}-band)",  f"Emission {_EMISSION_UNIT}"),
+            ("flux_tme", f"Molecular emission of lower atmosphere ({band_used}-band)",          f"Emission {_EMISSION_UNIT}"),
+            ("flux_sml", f"Scattered moonlight ({band_used}-band)",         f"Emission {_EMISSION_UNIT}"),
+            ("flux_ssl", f"Scattered starlight ({band_used}-band)",         f"Emission {_EMISSION_UNIT}"),
         ]
         for field_name, title, ylabel in SKY_COMPONENTS:
             plot_simple_from_result(sky, lam, field_name, title, ylabel)
@@ -833,7 +839,7 @@ def render_tab_molecules(result):
             continue
 
         fig, ax1 = plt.subplots(figsize=(8.5, 4.5))
-        ax1.plot(lam, tpl, lw=1.8, label=f"{mol.upper()} template")
+        ax1.plot(lam, tpl, lw=0.8, label=f"{mol.upper()} template")
         ax1.set_ylim(-0.05, 1.05)
         ax1.set_xlabel("Wavelength (μm)")
         ax1.set_ylabel("Template (normalized)")
@@ -846,7 +852,7 @@ def render_tab_molecules(result):
 
         ax2 = ax1.twinx()
         if snr.size == lam.size:
-            ax2.plot(lam, snr, lw=1.2, alpha=0.25, label="Target spectrum")
+            ax2.plot(lam, snr, lw=0.8, alpha=0.25, label="Target spectrum")
         ax2.set_ylabel("SNR per resolution")
 
         h1, l1 = ax1.get_legend_handles_labels()
@@ -862,8 +868,8 @@ def render_tab_molecules(result):
         st.pyplot(fig, clear_figure=True)
 
         n_lines = mm.get("n_lines", None)
-        spt = mm.get("snr_per_transit", None)
-        ntr = mm.get("n_transits_req", None)
+        spt = mm.get("snr_per_night", None)
+        ntr = mm.get("n_nights_req", None)
 
         if n_lines is not None:
             render_molecule_metric_line(mol, n_lines, spt, ntr)
@@ -890,21 +896,21 @@ def render_tab_debug(result):
 # Main
 # =========================
 def main():
-    init_session_state()
-
     st.set_page_config(
-    page_title="VIOLA ETC",
-    page_icon=Image.open("assets/viola_bw_icon.png"),
-    layout="centered", 
+        page_title="VIOLA ETC",
+        page_icon=Image.open("assets/viola_bw_icon.png"),
+        layout="centered",
     )
 
-    st.header("VIOLA Exposure Time Calculator -- Ver 0.5 🌈 ", divider="rainbow")
+    init_session_state()
+
+    st.header("VIOLA Exposure Time Calculator 🌈 ", divider="rainbow")
 
     with st.sidebar:
         st.markdown("### VIOLA ETC")
         st.markdown(
             """
-            <a href="https://github.com/sirinrats/viola-etc/blob/main/documents/viola_etc_technical.pdf" target="_blank" style="
+            <a href="https://github.com/sirinrats/viola-etc/tree/main/documents" target="_blank" style="
                 display: inline-flex;
                 align-items: center;
                 gap: 0.4rem;

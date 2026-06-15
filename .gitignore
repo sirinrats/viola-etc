@@ -24,13 +24,5 @@ env/
 .vscode/
 .idea/
 
-# Technical documentation — only the PDF ships to GitHub
-# This covers viola_etc.tex, build artifacts (.aux, .log, ...), the bib/ folder,
-# and figures/.  Only *.pdf at the top level of the folder is tracked.
-documents/*
-!documents/
-!documents/*.pdf
-# Also explicitly cover the .bib files and BibTeX build artifacts
-VIOLA_ETC_Technical_Documentation/bib/
-*.bbl
-*.blg
+# Technical documentation: documents/ has its own .gitignore that ships only
+# PDFs (at any depth) and ignores LaTeX sources, build artifacts, bib/, figures.

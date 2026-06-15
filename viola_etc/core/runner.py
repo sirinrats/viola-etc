@@ -1,5 +1,5 @@
 """
-viola_etc/runner.py
+viola_etc/core/runner.py
 
 Main ETC orchestrator: run_etc()
 
@@ -14,7 +14,6 @@ This module stitches together:
 
 from __future__ import annotations
 
-import inspect
 import math
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
@@ -43,6 +42,7 @@ from ..models import (
 from .validate import (
     validate_instrument_config,
     validate_mag_sweep,
+    validate_molecule_params,
     validate_site_config,
     validate_user_inputs,
 )
@@ -165,6 +165,8 @@ def run_etc(
     validate_site_config(site)
     validate_user_inputs(u, cfg)
     validate_mag_sweep(mag_sweep_min, mag_sweep_max, mag_sweep_step)
+    if enable_molecules:
+        validate_molecule_params(prom_abs, snr_thresh, detrend_p, detect_sig, min_lines_for_calc)
 
     # -------------------------
     # Derived scalars
@@ -310,47 +312,22 @@ def run_etc(
     mol_metrics: Dict[str, Dict[str, Any]] = {}
 
     if enable_molecules:
-        sig = inspect.signature(load_molecule_templates)
-        lt_kwargs: Dict[str, Any] = {}
-
-        # wavelength grid
-        if "lam_um_arr" in sig.parameters:
-            lt_kwargs["lam_um_arr"] = lam_um_arr
-        elif "lam_um" in sig.parameters:
-            lt_kwargs["lam_um"] = lam_um_arr
-
-        # band / resolution
-        if "band" in sig.parameters:
-            lt_kwargs["band"] = band
-        if "resolving_power" in sig.parameters:
-            lt_kwargs["resolving_power"] = cfg.resolving_power
-        elif "R" in sig.parameters:
-            lt_kwargs["R"] = cfg.resolving_power
-
-        # templates directory
-        if "molecule_dir" in sig.parameters:
-            lt_kwargs["molecule_dir"] = molecule_dir
-        elif "template_dir" in sig.parameters:
-            lt_kwargs["template_dir"] = molecule_dir
-
-        # molecules list — superset across all v0.5 planet classes;
-        # load_molecule_templates silently skips ones with no matching file
-        default_mols = ("CH4", "CO", "CO2", "H2O", "NH3", "O2", "OH")
-        if "molecules" in sig.parameters:
-            lt_kwargs["molecules"] = default_mols
-        elif "mols" in sig.parameters:
-            lt_kwargs["mols"] = default_mols
-
-        # v0.5 grid: filter to a specific planet class if supported
-        if "class_name" in sig.parameters and class_name:
-            lt_kwargs["class_name"] = class_name
-
-        mol_templates = load_molecule_templates(**lt_kwargs)
+        # molecules list is a superset across all v0.5 planet classes;
+        # load_molecule_templates silently skips ones with no matching file.
+        # class_name=None selects the legacy filename patterns.
+        mol_templates = load_molecule_templates(
+            lam_um_arr=lam_um_arr,
+            band=band,
+            resolving_power=cfg.resolving_power,
+            molecule_dir=molecule_dir,
+            molecules=("CH4", "CO", "CO2", "H2O", "NH3", "O2", "OH"),
+            class_name=class_name if class_name else None,
+            v_rv_km_s=u.target.v_rv_km_s,
+        )
 
         if mol_templates:
             mol_metrics = estimate_transits_for_molecules(
                 templates=mol_templates,
-                lam_um_arr=lam_um_arr,
                 snr_res_arr=snr_res_arr,
                 nx=cfg.nx,
                 prom_abs=prom_abs,

@@ -11,7 +11,7 @@ Each FITS binary table contains 14 columns (vacuum wavelengths, 900–2750 nm,
 R = 300 000, observatory = Paranal):
   lam       vacuum wavelength [nm]
   trans     total atmospheric transmission [0–1]
-  flux      total sky emission [ph s⁻¹ m⁻² µm⁻¹ arcsec⁻²]
+  flux      total sky emission [ph s^-1 m^-2 um^-1 arcsec^-2]
   flux_zl   zodiacal light
   flux_ael  airglow emission lines (upper atmosphere)
   flux_tme  molecular emission (lower atmosphere)
@@ -43,7 +43,7 @@ from ..models import InstrumentConfig, SiteConfig
 class SkyData(NamedTuple):
     """
     All sky model arrays trimmed to a single band window.
-    All flux columns in ph s⁻¹ m⁻² µm⁻¹ arcsec⁻².
+    All flux columns in ph s^-1 m^-2 um^-1 arcsec^-2.
 
     sky_phi is the explicit sum of the 6 sky emission components
     (flux_zl + flux_ael + flux_tme + flux_sml + flux_ssl + flux_arc).
@@ -52,7 +52,7 @@ class SkyData(NamedTuple):
     (runner.py). 
     flux_tie is stored for diagnostics but not added to sky_phi.
     """
-    lam_um   : np.ndarray   # vacuum wavelength [µm]
+    lam_um   : np.ndarray   # vacuum wavelength [um]
     trans    : np.ndarray   # total atmospheric transmission [0–1]
     sky_phi  : np.ndarray   # sky emission = sum of 6 components (flux_tie excluded)
     flux_zl  : np.ndarray   # zodiacal light
@@ -111,6 +111,11 @@ def _pick_closest_grid_fits(grid_dir: Path, alt_deg: float, pwv_mm: float) -> st
             "Expected pattern: skytable_alt30_pwv0p5_*.fits"
         )
 
+    # L1 sum of (degrees) + (mm): dimensionally mixed, but correct for this grid.
+    # The 5x9 altitude-PWV grid is a complete rectangular product, and altitude is
+    # coarsely sampled (15 deg steps) relative to PWV, so the L1 nearest neighbour
+    # reduces to the per-axis nearest node. Assumes a rectangular grid; revisit if
+    # the grid axes or spacing change.
     best = min(candidates, key=lambda r: abs(r[1] - alt_deg) + abs(r[2] - pwv_mm))
     return str(best[0])
 
@@ -207,7 +212,7 @@ def load_skytable(
                     f"available columns: {list(t.names)}"
                 )
 
-        lam_um  = _col(t, "lam") * 1e-3      # nm → µm
+        lam_um  = _col(t, "lam") * 1e-3      # nm -> um
         trans   = _col(t, "trans")
 
         flux_zl  = _col(t, "flux_zl")
@@ -236,7 +241,7 @@ def load_skytable(
 
     if not m.any():
         raise ValueError(
-            f"No sky samples in {b} window {cfg.band_edges_um[b]} µm "
+            f"No sky samples in {b} window {cfg.band_edges_um[b]} um "
             f"for file {sky_fits_path}"
         )
 

@@ -1,5 +1,5 @@
 """
-viola_etc/molecules.py
+viola_etc/target/molecules.py
 
 Molecule template loading + simple detection estimator.
 
@@ -15,22 +15,30 @@ Pick the v0.5 grid by passing ``class_name='temperate_terrestrial'`` (etc.) and
 ``molecule_dir='molecular_templates'``.
 
 Line counting recipe (v0.5):
-  1.  Load raw transit-depth (ppm); interpolate to ETC wavelength grid.
-  2.  Determine the per-template in-band dynamic range.
-  3.  Set the absolute prominence threshold = ``prom_abs × in_band_range`` (ppm).
-  4.  ``find_peaks(prominence=threshold_ppm, distance=nx)`` — scipy computes
+  1.  Load the raw transit-depth template (ppm) and Doppler-shift its
+      wavelengths by the planet radial velocity (``v_rv_km_s``).
+  2.  Interpolate the shifted template onto the ETC (observed-frame) grid.
+  3.  Determine the per-template in-band dynamic range.
+  4.  Set the absolute prominence threshold = ``prom_abs × in_band_range`` (ppm).
+  5.  ``find_peaks(prominence=threshold_ppm, distance=nx)`` — scipy computes
       each peak's prominence locally; only peaks with local prominence above
       the absolute threshold are kept.
-  5.  Filter by per-pixel SNR threshold (unchanged from v0.4).
+  6.  Filter the surviving peaks by the per-resolution-element stellar SNR
+      (``snr_res >= snr_thresh``), dropping lines in deep telluric absorption.
+
+Steps 1-2 live in ``load_molecule_templates``; steps 3-6 (and the
+detection-significance / required-nights estimate) live in
+``estimate_transits_for_molecules``.
 """
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+
+from ..constants import C_M_S
 
 
 # =========================
@@ -139,12 +147,17 @@ def load_molecule_templates(
     molecule_dir: str = "./molecular_templates",
     molecules: Tuple[str, ...] = ("CH4", "CO", "CO2", "H2O", "NH3", "O2", "OH"),
     class_name: Optional[str] = None,
+    v_rv_km_s: float = 0.0,
 ) -> Dict[str, Dict[str, Any]]:
     """Load one transmission template per molecule for the chosen band.
 
     If ``class_name`` is provided, the v0.5 filename pattern is used:
         ``{class_name}_transmission_{MOL}_{BAND}_band.csv``
     Otherwise the legacy patterns are tried.
+
+    A non-zero ``v_rv_km_s`` Doppler-shifts each template's wavelengths
+    (relativistic) before interpolation, placing the planet lines at their
+    observer-frame positions (the planet is assumed to co-move with the star).
 
     For each molecule, the returned dict carries the raw transit depth in ppm
     on the ETC wavelength grid (``template_ppm``) and a min-max-normalised
@@ -198,10 +211,17 @@ def load_molecule_templates(
         except Exception:
             continue
 
+        # Apply relativistic Doppler shift to template wavelengths before
+        # interpolating onto the observed-frame sky grid.
+        wl_shifted = wl
+        if float(v_rv_km_s) != 0.0:
+            beta = float(v_rv_km_s) / (C_M_S * 1e-3)
+            wl_shifted = wl * np.sqrt((1.0 + beta) / (1.0 - beta))
+
         # Interpolate raw values onto the ETC wavelength grid (NO normalisation
         # — counting uses raw ppm so an absolute prominence threshold scales
         # correctly with each template's dynamic range).
-        y_res_ppm = _interp_to_grid(wl, y, lam_um_arr)
+        y_res_ppm = _interp_to_grid(wl_shifted, y, lam_um_arr)
 
         # Min-max copy retained for plotting backward compatibility.
         y_res_norm = _normalize_minmax_safe(y_res_ppm)
@@ -221,7 +241,6 @@ def load_molecule_templates(
 
 def estimate_transits_for_molecules(
     templates: Dict[str, Dict[str, Any]],
-    lam_um_arr: np.ndarray,
     snr_res_arr: np.ndarray,
     nx: int,
     prom_abs: float,
@@ -269,7 +288,8 @@ def estimate_transits_for_molecules(
 
         pks = _try_find_peaks(y_in, prominence=threshold_abs, distance=dist)
 
-        # filter by local SNR (unchanged)
+        # keep only peaks where the stellar SNR per resolution element clears
+        # snr_thresh (drops lines in deep telluric absorption)
         if pks.size:
             s_at = snr[pks]
             keep = np.isfinite(s_at) & (s_at >= float(snr_thresh))
@@ -282,18 +302,18 @@ def estimate_transits_for_molecules(
         if n_lines >= int(min_lines_for_calc):
             snr_at_lines = snr[pks_keep]   # SNR at the N_lines selected peaks
             snr_quadrature = float(np.sqrt(np.sum(snr_at_lines ** 2)))
-            spt = float(line_contrast) * float(detrend_p) * snr_quadrature
-            ntr = (float(detect_sig) / spt) ** 2 if spt > 0 else float("inf")
+            snr_night = float(line_contrast) * float(detrend_p) * snr_quadrature
+            n_nights = (float(detect_sig) / snr_night) ** 2 if snr_night > 0 else float("inf")
         else:
-            spt = float("nan")
-            ntr = float("nan")
+            snr_night = float("nan")
+            n_nights = float("nan")
 
         out[mol] = {
             "peaks_idx": pks,
             "peaks_idx_thr": pks_keep,
             "n_lines": n_lines,
-            "snr_per_transit": spt,
-            "n_transits_req": ntr,
+            "snr_per_night": snr_night,
+            "n_nights_req": n_nights,
             "threshold_abs_ppm": threshold_abs,   # for diagnostic / display
             "inband_range_ppm": inband_range,
         }
